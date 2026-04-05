@@ -10,6 +10,11 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { logHabit, completeAction } from "@/lib/data";
+import {
+  getOrCreateConversation,
+  loadConversationHistory,
+  saveMessage,
+} from "@/lib/conversations";
 
 const AREA_COLORS: Record<string, string> = {
   "Health & Fitness": "#4A8C6F",
@@ -78,6 +83,7 @@ interface Message {
   isStatus?: boolean;
   isConflict?: boolean;
   pendingEvent?: PendingEvent;
+  created_at?: string;
 }
 
 const WEEKLY_TEMPLATE: Record<number, ScheduleBlock[]> = {
@@ -186,7 +192,7 @@ WHAT YOU CAN DO:
 6. Capture journal/sentiment -- use <journal> tag
 
 LOGGING -- always end response with <log> tag:
-<log>{"logs": [{"type": "habit", "name": "...", "value": "true"}, {"type": "metric", "name": "...", "value": 123}, {"type": "food", "name": "...", "calories": 0, "protein": 0, "carbs": 0, "fat": 0}]}</log>
+<log>{"logs": [{"type": "habit", "name": "...", "value": "true"}, {"type": "metric", "name": "...", "value": 123}, {"type": "food", "name": "food name", "calories": 450, "protein": 35, "carbs": 40, "fat": 12, "meal_type": "breakfast|lunch|dinner|snack"}]}</log>
 If nothing to log: <log>{"logs": []}</log>
 
 ACTIONS -- when user asks to create, move, complete or dismiss something, include <action> tag:
@@ -289,6 +295,8 @@ export default function Dashboard() {
   const [selectedArea, setSelectedArea] = useState("All");
   const [loading, setLoading] = useState(false);
   const [pendingEvent, setPendingEvent] = useState<PendingEvent | null>(null);
+  const [conversationId, setConversationId] = useState<string>("");
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -338,7 +346,59 @@ export default function Dashboard() {
   }, [profileId]);
 
   useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    if (bottomRef.current) {
+      const container = bottomRef.current.parentElement;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }, [messages]);
+
+  const loadAreaConversation = useCallback(async (area: string) => {
+    if (!profileId) return;
+    if (area === "All") {
+      setMessages([]);
+      setConversationId("");
+      return;
+    }
+    setLoadingHistory(true);
+    setMessages([]);
+    try {
+      const history = await loadConversationHistory(profileId, area, 40);
+      const convId = await getOrCreateConversation(profileId, area);
+      setConversationId(convId);
+      if (history.length > 0) {
+        setMessages(history.map(m => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          created_at: m.created_at,
+        })));
+      } else {
+        const areaWelcome: Record<string, string> = {
+          "Health & Fitness": "Your Health chat is ready. Log workouts, meals, weight, steps -- anything health related. I remember everything you tell me here.",
+          "Work": "Your Work chat is ready. Log your Rule of 100 count, project updates, actions completed, or anything work related.",
+          "Finances": "Your Finances chat is ready. Log income, expenses, or any financial updates.",
+          "Relationships": "Your Relationships chat is ready. Log quality time, family contact, or anything relationship related.",
+          "Personal Development": "Your Personal Development chat is ready. Log learning sessions, videos published, or skills practiced.",
+          "Hobbies & Creativity": "Your Hobbies chat is ready. Log gigs, golf sessions, gaming time, or creative work.",
+          "Environment & Lifestyle": "Your Environment chat is ready. Log your morning routine, workspace, sleep, or lifestyle habits.",
+        };
+        setMessages([{
+          id: "welcome",
+          role: "assistant",
+          content: areaWelcome[area] || `Your ${area} chat is ready.`,
+        }]);
+      }
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [profileId]);
+
+  useEffect(() => {
+    loadAreaConversation(selectedArea);
+  }, [selectedArea, loadAreaConversation]);
 
   const handleToggleHabit = async (habitId: string) => {
     if (habitLogs.has(habitId)) return;
@@ -473,6 +533,20 @@ export default function Dashboard() {
         } else {
           results.push({ type: "metric", name: log.name, success: false });
         }
+      }
+
+      if (log.type === "food") {
+        const { error } = await supabase.from("food_logs").insert({
+          profile_id: profileId,
+          food_name: log.name || "Unknown food",
+          calories: log.calories || null,
+          protein_g: log.protein || log.protein_g || null,
+          carbs_g: log.carbs || log.carbs_g || null,
+          fat_g: log.fat || log.fat_g || null,
+          meal_type: log.meal_type || null,
+          logged_at: todayStr,
+        });
+        results.push({ type: "food", name: log.name, success: !error });
       }
     }
 
@@ -676,8 +750,16 @@ export default function Dashboard() {
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = "auto";
 
+    // Save user message if in area thread
+    if (conversationId && selectedArea !== "All") {
+      await saveMessage(profileId, conversationId, "user", text || "Food photo uploaded");
+    }
+
     try {
-      const history = messages.slice(-10).map(m => ({ role: m.role, content: m.content }));
+      const history = messages
+        .filter(m => !m.isStatus && !m.isConflict && m.id !== "welcome")
+        .slice(-20)
+        .map(m => ({ role: m.role, content: m.content }));
       const userContent: any = imageBase64
         ? [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageBase64 } },
@@ -707,6 +789,11 @@ export default function Dashboard() {
         .replace(/<journal>[\s\S]*?<\/journal>/g, "")
         .trim();
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: displayContent }]);
+
+      // Save assistant message if in area thread
+      if (conversationId && selectedArea !== "All") {
+        await saveMessage(profileId, conversationId, "assistant", displayContent);
+      }
 
       // Process operations and collect results
       const logResults = logData ? await processLogs(logData) : [];
@@ -814,7 +901,7 @@ export default function Dashboard() {
         <div style={{ marginBottom: "16px" }}>
 
           {/* Messages */}
-          {messages.length > 0 && (
+          {(messages.length > 0 || loadingHistory) && (
             <div style={{
               backgroundColor: CARD_BG,
               backdropFilter: "blur(20px)",
@@ -829,6 +916,14 @@ export default function Dashboard() {
               boxShadow: "0 -2px 20px rgba(0,0,0,0.06)",
               scrollBehavior: "smooth",
             }}>
+              {loadingHistory && (
+                <div style={{ display: "flex", justifyContent: "center", padding: "20px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Loader2 size={14} color="#9CA3AF" style={{ animation: "spin 1s linear infinite" }} />
+                    <span style={{ fontSize: "12px", color: "#9CA3AF" }}>Loading conversation history...</span>
+                  </div>
+                </div>
+              )}
               {messages.map((message) => (
                 <div key={message.id} style={{ display: "flex", justifyContent: message.role === "user" ? "flex-end" : "flex-start" }}>
                   {message.isConflict ? (
@@ -927,13 +1022,13 @@ export default function Dashboard() {
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
             border: `1px solid ${CARD_BORDER}`,
-            borderRadius: messages.length > 0 ? "0 0 18px 18px" : "18px",
+            borderRadius: (messages.length > 0 || loadingHistory) ? "0 0 18px 18px" : "18px",
             overflow: "hidden",
             boxShadow: CARD_SHADOW,
           }}>
 
             {/* Empty state */}
-            {messages.length === 0 && (
+            {messages.length === 0 && !loadingHistory && (
               <div style={{
                 padding: "32px 24px 20px",
                 textAlign: "center",
@@ -941,10 +1036,13 @@ export default function Dashboard() {
               }}>
                 <div style={{ position: "absolute", top: "-20px", right: "-20px", width: "140px", height: "140px", borderRadius: "50%", backgroundColor: "rgba(44,95,138,0.05)" }} />
                 <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "24px", color: "#111827", marginBottom: "6px", position: "relative" }}>
-                  What have you done today?
+                  {selectedArea === "All" ? "What have you done today?" : `${selectedArea.split(" & ")[0].split(" ")[0]} chat`}
                 </h2>
                 <p style={{ fontSize: "13px", color: "#6B7280", position: "relative" }}>
-                  Tell me anything and I'll log it automatically
+                  {selectedArea === "All"
+                    ? "Tell me anything and I'll log it automatically"
+                    : "Your conversation history for this area lives here"
+                  }
                 </p>
               </div>
             )}
@@ -995,7 +1093,7 @@ export default function Dashboard() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={selectedArea !== "All" ? `Log something in ${selectedArea.split(" ")[0]}...` : "Log a workout, food, habit, metric..."}
+                placeholder={selectedArea !== "All" ? `Log something in ${selectedArea.split(" ")[0]} or ask anything...` : "Log a workout, food, habit, metric..."}
                 rows={2}
                 style={{
                   flex: 1, backgroundColor: "rgba(0,0,0,0.05)",

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useProfileStore } from "@/store/profileStore";
 import { supabase } from "@/lib/supabase";
 import { format, subDays } from "date-fns";
+import { getFoodLogs, getDailyMacros } from "@/lib/conversations";
 import {
   BarChart2, Flame, Beef, Wheat, Droplets,
   Activity, Footprints, Moon, Scale,
@@ -98,6 +99,9 @@ export default function AnalyticsPage() {
   const monthYear = format(new Date(), "MMMM yyyy");
 
   const [foodLogs, setFoodLogs] = useState<any[]>([]);
+  const [allFoodLogs, setAllFoodLogs] = useState<any[]>([]);
+  const [dailyMacros, setDailyMacros] = useState<any[]>([]);
+  const [nutritionDate, setNutritionDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [bodyMetrics, setBodyMetrics] = useState<any[]>([]);
   const [weightTrend, setWeightTrend] = useState<number[]>([]);
   const [bodyFatTrend, setBodyFatTrend] = useState<number[]>([]);
@@ -126,6 +130,14 @@ export default function AnalyticsPage() {
     ]);
 
     setFoodLogs(foodData || []);
+
+    // Load nutrition logbook data
+    const [allFoodData, macroData] = await Promise.all([
+      getFoodLogs(profileId, 30),
+      getDailyMacros(profileId, 14),
+    ]);
+    setAllFoodLogs(allFoodData);
+    setDailyMacros(macroData);
 
     // Body metrics - latest value per metric
     const metrics = metricsData || [];
@@ -236,9 +248,9 @@ export default function AnalyticsPage() {
 
   // Nutrition totals
   const totalCalories = foodLogs.reduce((sum, f) => sum + (f.calories || 0), 0);
-  const totalProtein = foodLogs.reduce((sum, f) => sum + (f.protein || 0), 0);
-  const totalCarbs = foodLogs.reduce((sum, f) => sum + (f.carbs || 0), 0);
-  const totalFat = foodLogs.reduce((sum, f) => sum + (f.fat || 0), 0);
+  const totalProtein = foodLogs.reduce((sum, f) => sum + (f.protein_g || f.protein || 0), 0);
+  const totalCarbs = foodLogs.reduce((sum, f) => sum + (f.carbs_g || f.carbs || 0), 0);
+  const totalFat = foodLogs.reduce((sum, f) => sum + (f.fat_g || f.fat || 0), 0);
 
   const getBodyIcon = (name: string) => {
     const n = name.toLowerCase();
@@ -318,12 +330,12 @@ export default function AnalyticsPage() {
                     padding: "8px 0",
                     borderBottom: i < foodLogs.length - 1 ? "1px solid #F9FAFB" : "none",
                   }}>
-                    <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>{f.name}</span>
+                    <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>{f.food_name || f.name}</span>
                     <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "#9CA3AF" }}>
                       <span>{f.calories || 0} kcal</span>
-                      <span>{f.protein || 0}p</span>
-                      <span>{f.carbs || 0}c</span>
-                      <span>{f.fat || 0}f</span>
+                      <span>{f.protein_g || f.protein || 0}p</span>
+                      <span>{f.carbs_g || f.carbs || 0}c</span>
+                      <span>{f.fat_g || f.fat || 0}f</span>
                     </div>
                   </div>
                 ))}
@@ -462,6 +474,142 @@ export default function AnalyticsPage() {
                 No work metrics tracked yet
               </p>
             )}
+          </div>
+        </GradientCard>
+
+        {/* Section 5: Nutrition Logbook */}
+        <GradientCard>
+          <CardHeader title="Nutrition Logbook" icon={<Beef size={14} color="#fff" />} />
+          <div style={{ padding: "16px" }}>
+
+            {/* Daily macro summary bars */}
+            <p style={{ fontSize: "11px", fontWeight: 600, color: "#6B7280", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Last 7 days
+            </p>
+            {dailyMacros.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+                {dailyMacros.slice(-7).reverse().map(day => {
+                  const proteinPct = Math.min((day.protein_g / 175) * 100, 100);
+                  const calPct = Math.min((day.calories / 2200) * 100, 100);
+                  return (
+                    <div key={day.date} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <span style={{ fontSize: "10px", fontWeight: 600, color: "#9CA3AF", minWidth: "40px" }}>
+                        {format(new Date(day.date + "T12:00:00"), "EEE d")}
+                      </span>
+                      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "3px" }}>
+                        {[
+                          { label: "Protein", pct: proteinPct, color: "#4A8C6F", value: `${Math.round(day.protein_g)}g` },
+                          { label: "Calories", pct: calPct, color: "#2C5F8A", value: `${Math.round(day.calories)}` },
+                        ].map(bar => (
+                          <div key={bar.label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "9px", color: "#9CA3AF", minWidth: "44px" }}>{bar.label}</span>
+                            <div style={{ flex: 1, backgroundColor: "#F3F4F6", borderRadius: "99px", height: "5px" }}>
+                              <div style={{ width: `${bar.pct}%`, height: "5px", borderRadius: "99px", backgroundColor: bar.color, transition: "width 0.5s ease" }} />
+                            </div>
+                            <span style={{ fontSize: "9px", color: "#6B7280", minWidth: "30px", textAlign: "right" }}>{bar.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "8px 0", marginBottom: "16px" }}>
+                No nutrition data yet. Log meals in the Health chat.
+              </p>
+            )}
+
+            <div style={{ height: "1px", backgroundColor: "#F3F4F6", margin: "0 0 16px" }} />
+
+            {/* Food log entries by day */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+              <button onClick={() => {
+                const d = new Date(nutritionDate + "T12:00:00");
+                d.setDate(d.getDate() - 1);
+                setNutritionDate(format(d, "yyyy-MM-dd"));
+              }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
+                Previous day
+              </button>
+              <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", color: "#111827" }}>
+                {format(new Date(nutritionDate + "T12:00:00"), "EEEE, d MMMM")}
+              </span>
+              <button onClick={() => {
+                const d = new Date(nutritionDate + "T12:00:00");
+                d.setDate(d.getDate() + 1);
+                setNutritionDate(format(d, "yyyy-MM-dd"));
+              }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
+                Next day
+              </button>
+            </div>
+
+            {(() => {
+              const dayFoodLogs = allFoodLogs.filter(f => f.logged_at === nutritionDate);
+              const dayTotals = dayFoodLogs.reduce((acc, f) => ({
+                calories: acc.calories + (f.calories || 0),
+                protein_g: acc.protein_g + (f.protein_g || 0),
+                carbs_g: acc.carbs_g + (f.carbs_g || 0),
+                fat_g: acc.fat_g + (f.fat_g || 0),
+              }), { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+
+              if (dayFoodLogs.length === 0) {
+                return (
+                  <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "16px 0" }}>
+                    No food logged for this day. Log meals in the Health chat.
+                  </p>
+                );
+              }
+
+              return (
+                <>
+                  {/* Day totals */}
+                  <div style={{
+                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px",
+                    padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px", marginBottom: "12px",
+                  }}>
+                    {[
+                      { label: "Cal", value: Math.round(dayTotals.calories), color: "#2C5F8A" },
+                      { label: "Pro", value: `${Math.round(dayTotals.protein_g)}g`, color: "#4A8C6F" },
+                      { label: "Carbs", value: `${Math.round(dayTotals.carbs_g)}g`, color: "#D97706" },
+                      { label: "Fat", value: `${Math.round(dayTotals.fat_g)}g`, color: "#7C3AED" },
+                    ].map(t => (
+                      <div key={t.label} style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: "16px", fontWeight: 700, color: t.color, fontFamily: '"Cal Sans", Inter, sans-serif' }}>{t.value}</div>
+                        <div style={{ fontSize: "9px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>{t.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Individual entries */}
+                  {dayFoodLogs.map((f, i) => (
+                    <div key={f.id || i} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "8px 0",
+                      borderBottom: i < dayFoodLogs.length - 1 ? "1px solid #F9FAFB" : "none",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>{f.food_name}</span>
+                        {f.meal_type && (
+                          <span style={{
+                            fontSize: "9px", fontWeight: 600, color: "#6B7280",
+                            backgroundColor: "#F3F4F6", padding: "2px 7px", borderRadius: "99px",
+                            textTransform: "capitalize",
+                          }}>
+                            {f.meal_type}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: "10px", fontSize: "11px", color: "#9CA3AF" }}>
+                        <span>{f.calories || 0} kcal</span>
+                        <span>{f.protein_g || 0}p</span>
+                        <span>{f.carbs_g || 0}c</span>
+                        <span>{f.fat_g || 0}f</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
           </div>
         </GradientCard>
 
