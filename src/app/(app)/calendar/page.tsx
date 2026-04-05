@@ -103,6 +103,11 @@ export default function CalendarPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [addingAt, setAddingAt] = useState<{ date: Date; hour: number } | null>(null);
+  const [conflictWarning, setConflictWarning] = useState<{
+    show: boolean;
+    conflicts: any[];
+    pendingEvent: { title: string; startTime: Date; endTime: Date } | null;
+  }>({ show: false, conflicts: [], pendingEvent: null });
 
   const [newEvent, setNewEvent] = useState<NewEvent>({
     title: "",
@@ -176,13 +181,8 @@ export default function CalendarPage() {
     setShowAddModal(true);
   };
 
-  const handleSaveEvent = async () => {
-    if (!newEvent.title.trim()) return;
-
-    const startTime = new Date(`${newEvent.date}T${newEvent.start_hour.padStart(2, "0")}:${newEvent.start_minute}:00`);
-    const endTime = new Date(`${newEvent.date}T${newEvent.end_hour.padStart(2, "0")}:${newEvent.end_minute}:00`);
-
-    const { data, error } = await supabase.from("calendar_events").insert({
+  const saveEventToDb = async (startTime: Date, endTime: Date) => {
+    const { error } = await supabase.from("calendar_events").insert({
       profile_id: profileId,
       title: newEvent.title,
       description: newEvent.description || null,
@@ -197,6 +197,7 @@ export default function CalendarPage() {
 
     if (!error) {
       setShowAddModal(false);
+      setConflictWarning({ show: false, conflicts: [], pendingEvent: null });
       setNewEvent({
         title: "", description: "",
         date: format(selectedDate, "yyyy-MM-dd"),
@@ -207,6 +208,34 @@ export default function CalendarPage() {
       });
       loadData();
     }
+  };
+
+  const handleSaveEvent = async () => {
+    if (!newEvent.title.trim()) return;
+
+    const startTime = new Date(`${newEvent.date}T${newEvent.start_hour.padStart(2, "0")}:${newEvent.start_minute}:00`);
+    const endTime = new Date(`${newEvent.date}T${newEvent.end_hour.padStart(2, "0")}:${newEvent.end_minute}:00`);
+
+    // Check for conflicts
+    const { data: existingEvents } = await supabase
+      .from("calendar_events")
+      .select("*")
+      .eq("profile_id", profileId)
+      .gte("start_time", `${newEvent.date}T00:00:00`)
+      .lte("start_time", `${newEvent.date}T23:59:59`);
+
+    const conflicts = (existingEvents || []).filter(e => {
+      const eStart = new Date(e.start_time).getTime();
+      const eEnd = new Date(e.end_time).getTime();
+      return startTime.getTime() < eEnd && endTime.getTime() > eStart;
+    });
+
+    if (conflicts.length > 0) {
+      setConflictWarning({ show: true, conflicts, pendingEvent: { title: newEvent.title, startTime, endTime } });
+      return;
+    }
+
+    await saveEventToDb(startTime, endTime);
   };
 
   const handleDeleteEvent = async (eventId: string) => {
@@ -396,47 +425,90 @@ export default function CalendarPage() {
                 );
               })}
 
-              {/* Events overlay */}
+              {/* Events overlay with overlap detection */}
               <div style={{ position: "absolute", top: 0, left: "64px", right: "8px" }}>
-                {dayEvents.map((event) => {
-                  const color = getEventColor(event);
-                  const top = getEventTop(event);
-                  const height = getEventHeight(event);
-                  const startTime = parseISO(event.start_time);
-                  const endTime = parseISO(event.end_time);
-                  return (
-                    <div
-                      key={event.id}
-                      onClick={e => { e.stopPropagation(); setSelectedEvent(event); }}
-                      style={{
-                        position: "absolute",
-                        top: `${top}px`,
-                        height: `${height}px`,
-                        left: "0", right: "0",
-                        background: `linear-gradient(135deg, ${color}22, ${color}12)`,
-                        border: `1.5px solid ${color}40`,
-                        borderLeft: `3px solid ${color}`,
-                        borderRadius: "8px",
-                        padding: "4px 8px",
-                        cursor: "pointer",
-                        overflow: "hidden",
-                        zIndex: 3,
-                        transition: "all 0.15s",
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.background = `linear-gradient(135deg, ${color}35, ${color}20)`)}
-                      onMouseLeave={e => (e.currentTarget.style.background = `linear-gradient(135deg, ${color}22, ${color}12)`)}
-                    >
-                      <p style={{ fontSize: "11px", fontWeight: 600, color, lineHeight: 1.2, margin: 0 }}>
-                        {event.title}
-                      </p>
-                      {height > 36 && (
-                        <p style={{ fontSize: "10px", color: `${color}99`, marginTop: "2px" }}>
-                          {format(startTime, "h:mm")} - {format(endTime, "h:mma")}
-                        </p>
-                      )}
-                    </div>
+                {(() => {
+                  const sorted = [...dayEvents].sort((a, b) =>
+                    new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
                   );
-                })}
+
+                  // Group overlapping events into columns
+                  const columns: CalendarEvent[][] = [];
+                  sorted.forEach(event => {
+                    const eStart = new Date(event.start_time).getTime();
+                    let placed = false;
+                    for (const col of columns) {
+                      const lastInCol = col[col.length - 1];
+                      const lastEnd = new Date(lastInCol.end_time).getTime();
+                      if (eStart >= lastEnd) {
+                        col.push(event);
+                        placed = true;
+                        break;
+                      }
+                    }
+                    if (!placed) columns.push([event]);
+                  });
+
+                  // Build layout map: event -> { colIndex, totalCols }
+                  const eventLayout = new Map<string, { colIndex: number; totalCols: number }>();
+                  sorted.forEach(event => {
+                    const eStart = new Date(event.start_time).getTime();
+                    const eEnd = new Date(event.end_time).getTime();
+                    const overlappingCols = columns.filter(col =>
+                      col.some(e => {
+                        const s = new Date(e.start_time).getTime();
+                        const en = new Date(e.end_time).getTime();
+                        return eStart < en && eEnd > s;
+                      })
+                    );
+                    const colIndex = columns.findIndex(col => col.includes(event));
+                    eventLayout.set(event.id, { colIndex, totalCols: overlappingCols.length });
+                  });
+
+                  return sorted.map((event) => {
+                    const color = getEventColor(event);
+                    const isExternal = event.source === "google" || event.source === "outlook";
+                    const layout = eventLayout.get(event.id) || { colIndex: 0, totalCols: 1 };
+                    const colWidth = 100 / layout.totalCols;
+                    const leftPct = layout.colIndex * colWidth;
+
+                    return (
+                      <div
+                        key={event.id}
+                        onClick={e => { e.stopPropagation(); setSelectedEvent(event); }}
+                        style={{
+                          position: "absolute",
+                          top: `${getEventTop(event)}px`,
+                          height: `${getEventHeight(event)}px`,
+                          left: `${leftPct}%`,
+                          width: `${colWidth - 1}%`,
+                          background: isExternal
+                            ? `repeating-linear-gradient(45deg, ${color}12, ${color}12 4px, ${color}06 4px, ${color}06 8px)`
+                            : `linear-gradient(135deg, ${color}22, ${color}12)`,
+                          border: `1.5px solid ${color}${isExternal ? "60" : "40"}`,
+                          borderLeft: `3px solid ${color}`,
+                          borderRadius: "8px",
+                          padding: "4px 8px",
+                          cursor: "pointer",
+                          overflow: "hidden",
+                          zIndex: 3,
+                          transition: "all 0.15s",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <p style={{ fontSize: "11px", fontWeight: 600, color, lineHeight: 1.2, margin: 0 }}>
+                          {event.title}
+                          {isExternal && <span style={{ fontSize: "9px", opacity: 0.7, marginLeft: "4px" }}>({event.source})</span>}
+                        </p>
+                        {getEventHeight(event) > 36 && (
+                          <p style={{ fontSize: "10px", color: `${color}99`, marginTop: "2px" }}>
+                            {format(parseISO(event.start_time), "h:mm")} - {format(parseISO(event.end_time), "h:mma")}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           </GradientCard>
@@ -753,6 +825,51 @@ export default function CalendarPage() {
                     boxSizing: "border-box",
                   }}
                 />
+
+                {/* Conflict warning */}
+                {conflictWarning.show && conflictWarning.conflicts.length > 0 && (
+                  <div style={{
+                    backgroundColor: "#FEF2F2",
+                    border: "1px solid #FECACA",
+                    borderRadius: "12px",
+                    padding: "12px 14px",
+                  }}>
+                    <p style={{ fontSize: "12px", fontWeight: 600, color: "#DC2626", marginBottom: "8px" }}>
+                      Conflict detected
+                    </p>
+                    {conflictWarning.conflicts.map(c => (
+                      <p key={c.id} style={{ fontSize: "11px", color: "#374151", marginBottom: "4px" }}>
+                        Overlaps with: {c.title} ({format(parseISO(c.start_time), "h:mm")} - {format(parseISO(c.end_time), "h:mma")})
+                      </p>
+                    ))}
+                    <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
+                      <button
+                        onClick={() => setConflictWarning({ show: false, conflicts: [], pendingEvent: null })}
+                        style={{
+                          flex: 1, padding: "8px", borderRadius: "8px",
+                          backgroundColor: "#fff", border: "1px solid #E5E7EB",
+                          fontSize: "12px", color: "#6B7280", cursor: "pointer",
+                        }}
+                      >
+                        Go back and edit
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (conflictWarning.pendingEvent) {
+                            saveEventToDb(conflictWarning.pendingEvent.startTime, conflictWarning.pendingEvent.endTime);
+                          }
+                        }}
+                        style={{
+                          flex: 1, padding: "8px", borderRadius: "8px",
+                          background: GRADIENT, border: "none",
+                          fontSize: "12px", color: "#fff", cursor: "pointer", fontWeight: 600,
+                        }}
+                      >
+                        Add anyway
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Save */}
                 <button

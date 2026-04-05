@@ -254,6 +254,7 @@ export default function Dashboard() {
   const { activeProfile } = useProfileStore();
   const profileId = activeProfile?.id || "";
   const today = format(new Date(), "EEEE, d MMMM");
+  const todayStr = format(new Date(), "yyyy-MM-dd");
 
   const [schedule, setSchedule] = useState<ScheduleBlock[]>(WEEKLY_TEMPLATE[new Date().getDay()] || WEEKLY_TEMPLATE[1]);
 
@@ -275,7 +276,6 @@ export default function Dashboard() {
 
   const loadData = useCallback(async () => {
     if (!profileId) return;
-    const todayStr = format(new Date(), "yyyy-MM-dd");
     const tomorrowStr = format(addDays(new Date(), 1), "yyyy-MM-dd");
     const [
       { data: habitsData },
@@ -322,8 +322,13 @@ export default function Dashboard() {
 
   const handleToggleHabit = async (habitId: string) => {
     if (habitLogs.has(habitId)) return;
-    await logHabit(profileId, habitId);
-    setHabitLogs(prev => new Set([...prev, habitId]));
+    const { error } = await logHabit(profileId, habitId);
+    if (!error) {
+      setHabitLogs(prev => new Set([...prev, habitId]));
+      await loadData();
+    } else {
+      console.error("Failed to log habit:", error);
+    }
   };
 
   const handleCompleteAction = async (actionId: string) => {
@@ -335,7 +340,6 @@ export default function Dashboard() {
     if (!logData?.logs?.length) return [];
     console.log("Processing logs:", logData.logs);
     console.log("Available habits:", allHabits.map((h: any) => h.title));
-    const todayStr = format(new Date(), "yyyy-MM-dd");
     const results: { type: string; name: string; success: boolean }[] = [];
 
     for (const log of logData.logs) {
@@ -372,6 +376,17 @@ export default function Dashboard() {
             logged_at: todayStr, value: log.value || "true",
             note: log.note || null, source: "chat",
           }, { onConflict: "habit_id,logged_at" });
+          console.log("Upsert error:", error);
+
+          // Verify it was written
+          const { data: verification } = await supabase
+            .from("habit_logs")
+            .select("id, logged_at")
+            .eq("habit_id", habit.id)
+            .eq("logged_at", todayStr)
+            .single();
+          console.log("Verification:", verification);
+
           if (!error) {
             setHabitLogs(prev => new Set([...prev, habit.id]));
             results.push({ type: "habit", name: habit.title, success: true });
@@ -407,7 +422,6 @@ export default function Dashboard() {
   const processAction = async (actionData: any): Promise<{ success: boolean; message: string }> => {
     console.log("Processing action:", actionData);
     const { type, data } = actionData;
-    const todayStr = format(new Date(), "yyyy-MM-dd");
 
     try {
       if (type === "create_event") {
@@ -550,7 +564,7 @@ export default function Dashboard() {
             source: "chat",
             related_area: journalData.related_area || null,
             tags: journalData.tags || [],
-            logged_at: format(new Date(), "yyyy-MM-dd"),
+            logged_at: todayStr,
           });
         }
       } catch (e) {

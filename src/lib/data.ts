@@ -148,6 +148,7 @@ export async function logHabit(
       value,
       source: "manual",
     }, { onConflict: "habit_id,logged_at" });
+  console.log("logHabit result:", { today, habitId, error });
   return { data, error };
 }
 
