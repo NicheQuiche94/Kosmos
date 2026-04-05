@@ -63,11 +63,21 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
   external: "#6B7280",
 };
 
+interface PendingEvent {
+  title: string;
+  startTime: Date;
+  endTime: Date;
+  eventType: string;
+  conflicts: { title: string; start_time: string; end_time: string }[];
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   isStatus?: boolean;
+  isConflict?: boolean;
+  pendingEvent?: PendingEvent;
 }
 
 const WEEKLY_TEMPLATE: Record<number, ScheduleBlock[]> = {
@@ -278,6 +288,7 @@ export default function Dashboard() {
   const [input, setInput] = useState("");
   const [selectedArea, setSelectedArea] = useState("All");
   const [loading, setLoading] = useState(false);
+  const [pendingEvent, setPendingEvent] = useState<PendingEvent | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -343,6 +354,46 @@ export default function Dashboard() {
   const handleCompleteAction = async (actionId: string) => {
     await completeAction(actionId);
     setTodayActions(prev => prev.filter(a => a.id !== actionId));
+  };
+
+  const confirmPendingEvent = async () => {
+    if (!pendingEvent) return;
+    const { error } = await supabase.from("calendar_events").insert({
+      profile_id: profileId,
+      title: pendingEvent.title,
+      start_time: pendingEvent.startTime.toISOString(),
+      end_time: pendingEvent.endTime.toISOString(),
+      event_type: pendingEvent.eventType,
+      source: "internal",
+      color: null,
+    });
+    setPendingEvent(null);
+    if (!error) {
+      await loadData();
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: "assistant" as const,
+        content: `Event created: ${pendingEvent.title} on ${format(pendingEvent.startTime, "EEE d MMM 'at' h:mma")}`,
+        isStatus: true,
+      }]);
+    } else {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: "assistant" as const,
+        content: `Failed to create event: ${error.message}`,
+        isStatus: true,
+      }]);
+    }
+  };
+
+  const dismissPendingEvent = () => {
+    setPendingEvent(null);
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: "assistant" as const,
+      content: "Event cancelled. Tell me a different time and I'll schedule it there instead.",
+      isStatus: false,
+    }]);
   };
 
   const processLogs = async (logData: any) => {
@@ -487,7 +538,7 @@ export default function Dashboard() {
           return { success: false, message: `Invalid time format for event: ${data.title}` };
         }
 
-        // Check for conflicts
+        // Check for conflicts before inserting
         const { data: existingEvents } = await supabase
           .from("calendar_events")
           .select("id, title, start_time, end_time")
@@ -501,6 +552,24 @@ export default function Dashboard() {
           return startTime.getTime() < eEnd && endTime.getTime() > eStart;
         });
 
+        if (conflictingEvents.length > 0) {
+          // Don't insert yet -- hold for user confirmation
+          setPendingEvent({
+            title: data.title,
+            startTime,
+            endTime,
+            eventType: data.event_type || "action",
+            conflicts: conflictingEvents,
+          });
+          const conflictNames = conflictingEvents.map(e =>
+            `${e.title} (${format(new Date(e.start_time), "h:mm")} - ${format(new Date(e.end_time), "h:mma")})`
+          ).join(", ");
+          return {
+            success: true,
+            message: `CONFLICT:${data.title} at ${format(startTime, "h:mma")} on ${format(startTime, "EEE d MMM")} would overlap with ${conflictNames}`,
+          };
+        }
+
         const { error } = await supabase.from("calendar_events").insert({
           profile_id: profileId,
           title: data.title,
@@ -513,14 +582,6 @@ export default function Dashboard() {
 
         if (error) return { success: false, message: `Failed to create event: ${error.message}` };
         await loadData();
-
-        if (conflictingEvents.length > 0) {
-          const conflictNames = conflictingEvents.map(e =>
-            `${e.title} (${format(new Date(e.start_time), "h:mm")} - ${format(new Date(e.end_time), "h:mma")})`
-          ).join(", ");
-          return { success: true, message: `Event created: ${data.title} on ${format(startTime, "EEE d MMM 'at' h:mma")}. Warning: conflicts with ${conflictNames}` };
-        }
-
         return { success: true, message: `Event created: ${data.title} on ${format(startTime, "EEE d MMM 'at' h:mma")}` };
       }
 
@@ -672,11 +733,21 @@ export default function Dashboard() {
         if (failed.length > 0) statusLines.push(`Could not find: ${failed.map(r => r.name).join(", ")}`);
       }
       if (actionResult) {
-        statusLines.push(actionResult.success ? actionResult.message : `Action failed: ${actionResult.message}`);
+        if (actionResult.message.startsWith("CONFLICT:")) {
+          // Show conflict as interactive message with buttons
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 2).toString(),
+            role: "assistant" as const,
+            content: actionResult.message.replace("CONFLICT:", ""),
+            isConflict: true,
+          }]);
+        } else {
+          statusLines.push(actionResult.success ? actionResult.message : `Action failed: ${actionResult.message}`);
+        }
       }
       if (statusLines.length > 0) {
         setMessages(prev => [...prev, {
-          id: (Date.now() + 2).toString(),
+          id: (Date.now() + 3).toString(),
           role: "assistant" as const,
           content: statusLines.join("\n"),
           isStatus: true,
@@ -760,7 +831,49 @@ export default function Dashboard() {
             }}>
               {messages.map((message) => (
                 <div key={message.id} style={{ display: "flex", justifyContent: message.role === "user" ? "flex-end" : "flex-start" }}>
-                  {message.isStatus ? (
+                  {message.isConflict ? (
+                    <div style={{
+                      maxWidth: "84%",
+                      backgroundColor: "#FEF2F2",
+                      border: "1px solid #FECACA",
+                      borderRadius: "10px",
+                      padding: "10px 14px",
+                      fontSize: "12px",
+                      color: "#374151",
+                      lineHeight: 1.5,
+                      fontFamily: "Inter, sans-serif",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                        <div style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#D97706", flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600, color: "#92400E" }}>Scheduling conflict</span>
+                      </div>
+                      <p style={{ margin: "0 0 10px", color: "#374151", fontSize: "11px" }}>{message.content}</p>
+                      {pendingEvent && (
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            onClick={confirmPendingEvent}
+                            style={{
+                              flex: 1, padding: "7px 12px", borderRadius: "8px",
+                              background: GRADIENT, border: "none",
+                              fontSize: "11px", color: "#fff", cursor: "pointer", fontWeight: 600,
+                            }}
+                          >
+                            Add anyway
+                          </button>
+                          <button
+                            onClick={dismissPendingEvent}
+                            style={{
+                              flex: 1, padding: "7px 12px", borderRadius: "8px",
+                              backgroundColor: "#fff", border: "1px solid #E5E7EB",
+                              fontSize: "11px", color: "#6B7280", cursor: "pointer",
+                            }}
+                          >
+                            Choose a different time
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : message.isStatus ? (
                     <div style={{
                       maxWidth: "84%",
                       backgroundColor: "rgba(74,140,111,0.12)",
