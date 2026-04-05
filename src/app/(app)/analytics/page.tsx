@@ -1,0 +1,471 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useProfileStore } from "@/store/profileStore";
+import { supabase } from "@/lib/supabase";
+import { format, subDays } from "date-fns";
+import {
+  BarChart2, Flame, Beef, Wheat, Droplets,
+  Activity, Footprints, Moon, Scale,
+  Zap, TrendingUp, Play,
+} from "lucide-react";
+
+const GRADIENT = "linear-gradient(135deg, #2C5F8A 0%, #3B7FAD 50%, #4A9B8E 100%)";
+
+function GradientCard({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{ background: GRADIENT, borderRadius: "18px", padding: "1.5px", ...style }}>
+      <div style={{ backgroundColor: "#fff", borderRadius: "16.5px", overflow: "hidden", height: "100%" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CardHeader({ title, icon }: { title: string; icon?: React.ReactNode }) {
+  return (
+    <div style={{
+      background: GRADIENT, padding: "12px 16px",
+      display: "flex", alignItems: "center", gap: "8px",
+    }}>
+      {icon}
+      <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", fontWeight: 600, color: "#fff", margin: 0 }}>
+        {title}
+      </h2>
+    </div>
+  );
+}
+
+function StatBox({ label, value, target, unit, color, icon }: {
+  label: string; value: number; target: number; unit: string; color: string; icon: React.ReactNode;
+}) {
+  const pct = target > 0 ? Math.min((value / target) * 100, 100) : 0;
+  return (
+    <div style={{ flex: 1, minWidth: "0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "4px" }}>
+        {icon}
+        <span style={{ fontSize: "11px", fontWeight: 600, color: "#6B7280" }}>{label}</span>
+      </div>
+      <div style={{ fontSize: "22px", fontWeight: 700, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif', lineHeight: 1.2 }}>
+        {value}<span style={{ fontSize: "12px", fontWeight: 500, color: "#9CA3AF", marginLeft: "2px" }}>{unit}</span>
+      </div>
+      <div style={{ fontSize: "11px", color: "#9CA3AF", marginBottom: "6px" }}>of {target}{unit}</div>
+      <div style={{ height: "4px", borderRadius: "99px", backgroundColor: "#F3F4F6" }}>
+        <div style={{ height: "4px", borderRadius: "99px", backgroundColor: color, width: `${pct}%`, transition: "width 0.4s ease" }} />
+      </div>
+    </div>
+  );
+}
+
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  if (values.length === 0) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "32px" }}>
+      {values.map((v, i) => {
+        const h = ((v - min) / range) * 28 + 4;
+        return (
+          <div key={i} style={{
+            width: "6px", height: `${h}px`, borderRadius: "3px",
+            backgroundColor: i === values.length - 1 ? color : `${color}60`,
+            transition: "height 0.3s ease",
+          }} />
+        );
+      })}
+    </div>
+  );
+}
+
+function StreakDots({ days, color }: { days: boolean[]; color: string }) {
+  return (
+    <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+      {days.map((filled, i) => (
+        <div key={i} style={{
+          width: "8px", height: "8px", borderRadius: "50%",
+          backgroundColor: filled ? color : "#E5E7EB",
+        }} />
+      ))}
+    </div>
+  );
+}
+
+export default function AnalyticsPage() {
+  const { activeProfile } = useProfileStore();
+  const profileId = activeProfile?.id || "";
+  const today = format(new Date(), "yyyy-MM-dd");
+  const monthYear = format(new Date(), "MMMM yyyy");
+
+  const [foodLogs, setFoodLogs] = useState<any[]>([]);
+  const [bodyMetrics, setBodyMetrics] = useState<any[]>([]);
+  const [weightTrend, setWeightTrend] = useState<number[]>([]);
+  const [bodyFatTrend, setBodyFatTrend] = useState<number[]>([]);
+  const [habitStreaks, setHabitStreaks] = useState<any[]>([]);
+  const [workMetrics, setWorkMetrics] = useState<any[]>([]);
+
+  const loadData = useCallback(async () => {
+    if (!profileId) return;
+
+    const thirtyDaysAgo = format(subDays(new Date(), 30), "yyyy-MM-dd");
+    const sevenDaysAgo = format(subDays(new Date(), 7), "yyyy-MM-dd");
+
+    // Parallel queries
+    const [
+      { data: foodData },
+      { data: metricsData },
+      { data: metricLogsData },
+      { data: habitsData },
+      { data: habitLogsData },
+    ] = await Promise.all([
+      supabase.from("food_logs").select("*").eq("profile_id", profileId).eq("logged_at", today),
+      supabase.from("metrics").select("*").eq("profile_id", profileId).eq("active", true),
+      supabase.from("metric_logs").select("*, metrics(name, unit, target_value)").eq("profile_id", profileId).gte("logged_at", thirtyDaysAgo).order("logged_at", { ascending: false }),
+      supabase.from("habits").select("*, life_areas(name, color)").eq("profile_id", profileId).eq("active", true).eq("frequency", "daily"),
+      supabase.from("habit_logs").select("habit_id, logged_at").eq("profile_id", profileId).gte("logged_at", thirtyDaysAgo).order("logged_at", { ascending: false }),
+    ]);
+
+    setFoodLogs(foodData || []);
+
+    // Body metrics - latest value per metric
+    const metrics = metricsData || [];
+    const logs = metricLogsData || [];
+    const bodyNames = ["Weight", "Body fat", "Daily steps", "Sleep hours"];
+    const bodyResults: any[] = [];
+    for (const name of bodyNames) {
+      const metric = metrics.find((m: any) => m.name.toLowerCase().includes(name.toLowerCase()));
+      if (metric) {
+        const latestLog = logs.find((l: any) => l.metrics?.name?.toLowerCase().includes(name.toLowerCase()));
+        bodyResults.push({
+          name: metric.name,
+          unit: metric.unit || "",
+          target: metric.target_value || 0,
+          value: latestLog?.value || 0,
+          metricId: metric.id,
+        });
+      }
+    }
+    setBodyMetrics(bodyResults);
+
+    // Weight and body fat 7-day trends
+    const weightMetric = metrics.find((m: any) => m.name.toLowerCase().includes("weight"));
+    const fatMetric = metrics.find((m: any) => m.name.toLowerCase().includes("body fat"));
+    if (weightMetric) {
+      const wLogs = logs
+        .filter((l: any) => l.metrics?.name?.toLowerCase().includes("weight") && l.logged_at >= sevenDaysAgo)
+        .map((l: any) => l.value)
+        .reverse();
+      setWeightTrend(wLogs);
+    }
+    if (fatMetric) {
+      const fLogs = logs
+        .filter((l: any) => l.metrics?.name?.toLowerCase().includes("body fat") && l.logged_at >= sevenDaysAgo)
+        .map((l: any) => l.value)
+        .reverse();
+      setBodyFatTrend(fLogs);
+    }
+
+    // Habit streaks
+    const allHabits = habitsData || [];
+    const allLogs = habitLogsData || [];
+    const streakData: any[] = [];
+
+    for (const habit of allHabits) {
+      const habitLogDates = new Set(
+        allLogs.filter((l: any) => l.habit_id === habit.id).map((l: any) => l.logged_at)
+      );
+
+      // Calculate streak
+      let streak = 0;
+      let checkDate = new Date();
+      while (true) {
+        const dateStr = format(checkDate, "yyyy-MM-dd");
+        if (habitLogDates.has(dateStr)) {
+          streak++;
+          checkDate = subDays(checkDate, 1);
+        } else {
+          break;
+        }
+      }
+
+      // Last 7 days
+      const last7: boolean[] = [];
+      for (let d = 6; d >= 0; d--) {
+        const dateStr = format(subDays(new Date(), d), "yyyy-MM-dd");
+        last7.push(habitLogDates.has(dateStr));
+      }
+
+      streakData.push({
+        id: habit.id,
+        title: habit.title,
+        streak,
+        last7,
+        color: habit.life_areas?.color || "#2C5F8A",
+      });
+    }
+
+    streakData.sort((a, b) => b.streak - a.streak);
+    setHabitStreaks(streakData.slice(0, 5));
+
+    // Work metrics
+    const workNames = [
+      { name: "MakersForge MRR", target: 10000, icon: "makers" },
+      { name: "Shiftly MRR", target: 30000, icon: "shiftly" },
+      { name: "Rule of 100", target: 100, icon: "rule" },
+      { name: "YouTube subscribers", target: 1000, icon: "youtube" },
+    ];
+    const workResults: any[] = [];
+    for (const w of workNames) {
+      const metric = metrics.find((m: any) => m.name.toLowerCase().includes(w.name.toLowerCase()));
+      if (metric) {
+        const latestLog = logs.find((l: any) => l.metrics?.name?.toLowerCase().includes(w.name.toLowerCase()));
+        workResults.push({
+          name: metric.name,
+          unit: metric.unit || "",
+          target: metric.target_value || w.target,
+          value: latestLog?.value || 0,
+          icon: w.icon,
+          hasBar: w.name.includes("MRR"),
+        });
+      }
+    }
+    setWorkMetrics(workResults);
+  }, [profileId, today]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Nutrition totals
+  const totalCalories = foodLogs.reduce((sum, f) => sum + (f.calories || 0), 0);
+  const totalProtein = foodLogs.reduce((sum, f) => sum + (f.protein || 0), 0);
+  const totalCarbs = foodLogs.reduce((sum, f) => sum + (f.carbs || 0), 0);
+  const totalFat = foodLogs.reduce((sum, f) => sum + (f.fat || 0), 0);
+
+  const getBodyIcon = (name: string) => {
+    const n = name.toLowerCase();
+    if (n.includes("weight")) return <Scale size={14} color="#2C5F8A" />;
+    if (n.includes("fat")) return <Activity size={14} color="#DC2626" />;
+    if (n.includes("step")) return <Footprints size={14} color="#4A8C6F" />;
+    if (n.includes("sleep")) return <Moon size={14} color="#7C3AED" />;
+    return <Activity size={14} color="#6B7280" />;
+  };
+
+  const getWorkIcon = (icon: string) => {
+    if (icon === "makers") return <TrendingUp size={14} color="#2C5F8A" />;
+    if (icon === "shiftly") return <TrendingUp size={14} color="#4A8C6F" />;
+    if (icon === "rule") return <Zap size={14} color="#D97706" />;
+    if (icon === "youtube") return <Play size={14} color="#DC2626" />;
+    return <BarChart2 size={14} color="#6B7280" />;
+  };
+
+  return (
+    <div style={{ maxWidth: "860px", margin: "0 auto", padding: "0 0 140px 0", minHeight: "100vh" }}>
+
+      {/* Hero header */}
+      <div style={{
+        background: GRADIENT,
+        margin: "20px",
+        padding: "28px",
+        borderRadius: "24px",
+        position: "relative", overflow: "hidden",
+      }}>
+        <div style={{ position: "absolute", top: "-40px", right: "-40px", width: "180px", height: "180px", borderRadius: "50%", backgroundColor: "rgba(255,255,255,0.06)" }} />
+        <div style={{ position: "absolute", bottom: "-60px", right: "80px", width: "140px", height: "140px", borderRadius: "50%", backgroundColor: "rgba(255,255,255,0.04)" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", position: "relative" }}>
+          <div style={{
+            width: "44px", height: "44px", borderRadius: "14px",
+            backgroundColor: "rgba(255,255,255,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <BarChart2 size={22} color="#fff" />
+          </div>
+          <div>
+            <h1 style={{
+              fontFamily: '"Cal Sans", Inter, sans-serif',
+              fontSize: "28px", fontWeight: 600, color: "#fff", margin: 0, lineHeight: 1.1,
+            }}>
+              Analytics
+            </h1>
+            <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.65)", marginTop: "4px" }}>
+              {monthYear}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+        {/* Section 1: Today's Nutrition */}
+        <GradientCard>
+          <CardHeader title="Today's Nutrition" icon={<Flame size={14} color="#fff" />} />
+          <div style={{ padding: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+              <StatBox label="Calories" value={totalCalories} target={2200} unit="kcal" color="#D97706" icon={<Flame size={12} color="#D97706" />} />
+              <StatBox label="Protein" value={totalProtein} target={175} unit="g" color="#DC2626" icon={<Beef size={12} color="#DC2626" />} />
+              <StatBox label="Carbs" value={totalCarbs} target={200} unit="g" color="#D97706" icon={<Wheat size={12} color="#D97706" />} />
+              <StatBox label="Fat" value={totalFat} target={70} unit="g" color="#2C5F8A" icon={<Droplets size={12} color="#2C5F8A" />} />
+            </div>
+
+            {foodLogs.length > 0 && (
+              <>
+                <div style={{ height: "1px", backgroundColor: "#F3F4F6", margin: "0 0 12px" }} />
+                <p style={{ fontSize: "11px", fontWeight: 600, color: "#6B7280", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Entries today
+                </p>
+                {foodLogs.map((f, i) => (
+                  <div key={f.id || i} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "8px 0",
+                    borderBottom: i < foodLogs.length - 1 ? "1px solid #F9FAFB" : "none",
+                  }}>
+                    <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>{f.name}</span>
+                    <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "#9CA3AF" }}>
+                      <span>{f.calories || 0} kcal</span>
+                      <span>{f.protein || 0}p</span>
+                      <span>{f.carbs || 0}c</span>
+                      <span>{f.fat || 0}f</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {foodLogs.length === 0 && (
+              <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "8px 0" }}>
+                No food logged today yet
+              </p>
+            )}
+          </div>
+        </GradientCard>
+
+        {/* Section 2: Body Metrics */}
+        <GradientCard>
+          <CardHeader title="Body Metrics" icon={<Activity size={14} color="#fff" />} />
+          <div style={{ padding: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              {bodyMetrics.map((m) => {
+                const isWeight = m.name.toLowerCase().includes("weight");
+                const isFat = m.name.toLowerCase().includes("body fat");
+                const trend = isWeight ? weightTrend : isFat ? bodyFatTrend : [];
+                const pct = m.target > 0 ? Math.min((m.value / m.target) * 100, 100) : 0;
+                return (
+                  <div key={m.name} style={{ padding: "12px", backgroundColor: "#FAFAF8", borderRadius: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                      {getBodyIcon(m.name)}
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#6B7280" }}>{m.name}</span>
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 700, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif', lineHeight: 1.2 }}>
+                      {m.value}{m.unit ? <span style={{ fontSize: "12px", fontWeight: 500, color: "#9CA3AF", marginLeft: "2px" }}>{m.unit}</span> : null}
+                    </div>
+                    {m.target > 0 && (
+                      <div style={{ fontSize: "11px", color: "#9CA3AF", marginBottom: "8px" }}>Target: {m.target}{m.unit}</div>
+                    )}
+                    {trend.length > 0 && (
+                      <div style={{ marginTop: "4px" }}>
+                        <Sparkline values={trend} color={isWeight ? "#2C5F8A" : "#DC2626"} />
+                        <p style={{ fontSize: "10px", color: "#9CA3AF", marginTop: "4px" }}>Last 7 entries</p>
+                      </div>
+                    )}
+                    {!trend.length && m.target > 0 && (
+                      <div style={{ height: "4px", borderRadius: "99px", backgroundColor: "#F3F4F6", marginTop: "4px" }}>
+                        <div style={{ height: "4px", borderRadius: "99px", backgroundColor: "#2C5F8A", width: `${pct}%` }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {bodyMetrics.length === 0 && (
+              <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "8px 0" }}>
+                No body metrics tracked yet
+              </p>
+            )}
+          </div>
+        </GradientCard>
+
+        {/* Section 3: Habit Streaks */}
+        <GradientCard>
+          <CardHeader title="Action Streaks" icon={<Zap size={14} color="#fff" />} />
+          <div style={{ padding: "16px" }}>
+            {habitStreaks.map((h, i) => (
+              <div key={h.id} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "10px 0",
+                borderBottom: i < habitStreaks.length - 1 ? "1px solid #F9FAFB" : "none",
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "4px" }}>{h.title}</div>
+                  <StreakDots days={h.last7} color={h.color} />
+                </div>
+                <div style={{
+                  backgroundColor: `${h.color}15`, borderRadius: "99px",
+                  padding: "4px 12px", marginLeft: "12px", flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: "13px", fontWeight: 700, color: h.color }}>
+                    {h.streak}d
+                  </span>
+                </div>
+              </div>
+            ))}
+
+            {habitStreaks.length === 0 && (
+              <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "8px 0" }}>
+                No action data yet. Start logging to see streaks.
+              </p>
+            )}
+          </div>
+        </GradientCard>
+
+        {/* Section 4: Work Metrics */}
+        <GradientCard>
+          <CardHeader title="Work Metrics" icon={<TrendingUp size={14} color="#fff" />} />
+          <div style={{ padding: "16px" }}>
+            {workMetrics.map((w, i) => {
+              const pct = w.target > 0 ? Math.min((w.value / w.target) * 100, 100) : 0;
+              return (
+                <div key={w.name} style={{
+                  padding: "12px 0",
+                  borderBottom: i < workMetrics.length - 1 ? "1px solid #F9FAFB" : "none",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {getWorkIcon(w.icon)}
+                      <span style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>{w.name}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "4px" }}>
+                      <span style={{ fontSize: "18px", fontWeight: 700, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                        {w.unit === "GBP" ? "\u00A3" : ""}{w.value.toLocaleString()}
+                      </span>
+                      {w.target > 0 && (
+                        <span style={{ fontSize: "12px", color: "#9CA3AF" }}>
+                          / {w.unit === "GBP" ? "\u00A3" : ""}{w.target.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {w.hasBar && (
+                    <div style={{ height: "6px", borderRadius: "99px", backgroundColor: "#F3F4F6", marginTop: "6px" }}>
+                      <div style={{
+                        height: "6px", borderRadius: "99px",
+                        background: GRADIENT,
+                        width: `${pct}%`, transition: "width 0.4s ease",
+                      }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {workMetrics.length === 0 && (
+              <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "8px 0" }}>
+                No work metrics tracked yet
+              </p>
+            )}
+          </div>
+        </GradientCard>
+
+      </div>
+    </div>
+  );
+}
