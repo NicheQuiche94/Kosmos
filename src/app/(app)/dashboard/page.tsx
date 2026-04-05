@@ -155,7 +155,9 @@ const WEEKLY_TEMPLATE: Record<number, ScheduleBlock[]> = {
   ],
 };
 
-const SYSTEM_PROMPT = `You are Kosmos, Andre's personal life operating system. You can log data AND take actions inside the app. You are warm, direct, and efficient. No em-dashes. No emojis.
+const getSystemPrompt = () => `You are Kosmos, Andre's personal life operating system. You can log data AND take actions inside the app. You are warm, direct, and efficient. No em-dashes. No emojis.
+
+Today's date is ${format(new Date(), "yyyy-MM-dd")} (${format(new Date(), "EEEE")}).
 
 Andre's profile:
 - Self-employed, building MakersForge (recruitment), Seedcraft (venture studio: Shiftly, Smokeless, Escapage, Vent), Harika Labs (HiddenGem, Playfeed)
@@ -180,17 +182,22 @@ ACTIONS -- when user asks to create, move, complete or dismiss something, includ
   "type": "create_event|complete_action|dismiss_action|reschedule_event|create_action",
   "data": {
     "title": "event or action title",
-    "date": "yyyy-MM-dd",
+    "date": "yyyy-MM-dd (use actual upcoming date, never a past date, today is ${format(new Date(), "yyyy-MM-dd")})",
     "start_time": "HH:mm",
     "end_time": "HH:mm",
     "event_type": "focus_block|habit|personal|action|external",
     "action_id": "uuid if completing/dismissing existing action",
     "event_id": "uuid if rescheduling existing event",
     "priority": "high|medium|low",
-    "life_area": "area name"
+    "life_area": "area name",
+    "recurring": false,
+    "recurring_days": [1,2,3,4,5],
+    "recurring_weeks": 4
   }
 }
 </action>
+
+For recurring events: set "recurring": true and "recurring_days" to an array of day numbers (0=Sunday, 1=Monday ... 6=Saturday). "recurring_weeks" controls how many weeks ahead to create (default 4). For example, a weekday standup would use "recurring": true, "recurring_days": [1,2,3,4,5].
 
 JOURNAL -- only when genuine emotion or reflection is present:
 <journal>{"content": "...", "sentiment": "positive|neutral|negative|mixed", "energy_level": 1-10 or null, "related_area": "area name or null", "tags": []}</journal>
@@ -204,6 +211,7 @@ Examples of what you can handle:
 - "Move my deep work to 3pm" -> reschedule_event
 - "Mark the MakersForge client action as done" -> complete_action
 - "Add an action to chase leads by Friday" -> create_action
+- "Set up a daily standup Mon-Fri at 9am" -> create_event with recurring: true, recurring_days: [1,2,3,4,5]
 - "Did my morning mobility" -> log habit
 - "What does my afternoon look like?" -> answer from context, no tags needed
 - "I weigh 87.5kg" -> log metric`;
@@ -333,6 +341,8 @@ export default function Dashboard() {
     for (const log of logData.logs) {
       if (log.type === "habit") {
         const logName = log.name.toLowerCase().trim();
+        console.log("Trying to match:", logName);
+        console.log("Available habits:", allHabits.map((h: any) => `"${h.title}"`).join(", "));
 
         // Try exact match first, then partial, then word overlap
         let habit = allHabits.find((h: any) => h.title.toLowerCase() === logName);
@@ -345,6 +355,16 @@ export default function Dashboard() {
             return logWords.some((w: string) => habitWords.some((hw: string) => hw.includes(w) || w.includes(hw)));
           });
         }
+        // Stripped punctuation word overlap fallback
+        if (!habit) {
+          habit = allHabits.find((h: any) => {
+            const hWords = h.title.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(" ").filter((w: string) => w.length > 2);
+            const lWords = logName.replace(/[^a-z0-9 ]/g, "").split(" ").filter((w: string) => w.length > 2);
+            const overlap = hWords.filter((w: string) => lWords.includes(w));
+            return overlap.length >= Math.min(2, Math.min(hWords.length, lWords.length));
+          });
+        }
+        console.log("Matched habit:", habit ? habit.title : "NONE");
 
         if (habit) {
           const { error } = await supabase.from("habit_logs").upsert({
@@ -391,6 +411,51 @@ export default function Dashboard() {
 
     try {
       if (type === "create_event") {
+        const isRecurring = data.recurring === true;
+        const recurringDays: number[] = data.recurring_days || [];
+        const weeksAhead = data.recurring_weeks || 4;
+
+        if (isRecurring && recurringDays.length > 0) {
+          const eventsToCreate = [];
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          for (let week = 0; week < weeksAhead; week++) {
+            for (const dayNum of recurringDays) {
+              const date = new Date(today);
+              const daysUntil = (dayNum - date.getDay() + 7) % 7;
+              date.setDate(date.getDate() + daysUntil + (week * 7));
+
+              if (date < today) continue;
+
+              const dateStr = format(date, "yyyy-MM-dd");
+              const startTime = new Date(`${dateStr}T${(data.start_time || "09:00").replace(".", ":")}:00`);
+              const endTime = new Date(`${dateStr}T${(data.end_time || "10:00").replace(".", ":")}:00`);
+
+              if (!isNaN(startTime.getTime())) {
+                eventsToCreate.push({
+                  profile_id: profileId,
+                  title: data.title,
+                  start_time: startTime.toISOString(),
+                  end_time: endTime.toISOString(),
+                  event_type: data.event_type || "action",
+                  source: "internal",
+                  color: null,
+                });
+              }
+            }
+          }
+
+          if (eventsToCreate.length > 0) {
+            const { error } = await supabase.from("calendar_events").insert(eventsToCreate);
+            if (error) return { success: false, message: `Failed to create recurring events: ${error.message}` };
+            await loadData();
+            return { success: true, message: `Created ${eventsToCreate.length} recurring events for "${data.title}" across ${weeksAhead} weeks` };
+          }
+          return { success: false, message: "No future dates found for recurring event" };
+        }
+
+        // Single event
         const date = data.date || todayStr;
         const startTime = new Date(`${date}T${(data.start_time || "09:00").replace(".", ":")}:00`);
         const endTime = new Date(`${date}T${(data.end_time || "10:00").replace(".", ":")}:00`);
@@ -520,7 +585,7 @@ export default function Dashboard() {
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1500,
-          system: SYSTEM_PROMPT,
+          system: getSystemPrompt(),
           messages: [...history, { role: "user", content: userContent }],
         }),
       });
