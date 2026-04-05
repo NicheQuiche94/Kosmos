@@ -213,8 +213,13 @@ export default function CalendarPage() {
   const handleSaveEvent = async () => {
     if (!newEvent.title.trim()) return;
 
-    const startTime = new Date(`${newEvent.date}T${newEvent.start_hour.padStart(2, "0")}:${newEvent.start_minute}:00`);
-    const endTime = new Date(`${newEvent.date}T${newEvent.end_hour.padStart(2, "0")}:${newEvent.end_minute}:00`);
+    const parseLocalDateTime = (dateStr: string, hourStr: string, minuteStr: string): Date => {
+      const [year, month, day] = dateStr.split("-").map(Number);
+      return new Date(year, month - 1, day, parseInt(hourStr), parseInt(minuteStr), 0);
+    };
+
+    const startTime = parseLocalDateTime(newEvent.date, newEvent.start_hour, newEvent.start_minute);
+    const endTime = parseLocalDateTime(newEvent.date, newEvent.end_hour, newEvent.end_minute);
 
     // Check for conflicts
     const { data: existingEvents } = await supabase

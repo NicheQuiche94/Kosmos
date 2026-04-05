@@ -157,7 +157,10 @@ const WEEKLY_TEMPLATE: Record<number, ScheduleBlock[]> = {
 
 const getSystemPrompt = () => `You are Kosmos, Andre's personal life operating system. You can log data AND take actions inside the app. You are warm, direct, and efficient. No em-dashes. No emojis.
 
-Today's date is ${format(new Date(), "yyyy-MM-dd")} (${format(new Date(), "EEEE")}).
+Today is ${format(new Date(), "EEEE, yyyy-MM-dd")}.
+When the user says a day name like "Tuesday", calculate the actual date of the next Tuesday from today and use that yyyy-MM-dd date.
+Never offset the date. If today is Sunday 6 Apr and the user says Tuesday, the date is 2026-04-08.
+Double-check: the day name of your chosen date must match what the user requested.
 
 Andre's profile:
 - Self-employed, building MakersForge (recruitment), Seedcraft (venture studio: Shiftly, Smokeless, Escapage, Vent), Harika Labs (HiddenGem, Playfeed)
@@ -249,6 +252,12 @@ function CardHeader({ title, right }: { title: string; right?: React.ReactNode }
     </div>
   );
 }
+
+const parseLocalDateTime = (dateStr: string, timeStr: string): Date => {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const [hour, minute] = timeStr.replace(".", ":").split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute || 0, 0);
+};
 
 export default function Dashboard() {
   const { activeProfile } = useProfileStore();
@@ -443,8 +452,8 @@ export default function Dashboard() {
               if (date < today) continue;
 
               const dateStr = format(date, "yyyy-MM-dd");
-              const startTime = new Date(`${dateStr}T${(data.start_time || "09:00").replace(".", ":")}:00`);
-              const endTime = new Date(`${dateStr}T${(data.end_time || "10:00").replace(".", ":")}:00`);
+              const startTime = parseLocalDateTime(dateStr, data.start_time || "09:00");
+              const endTime = parseLocalDateTime(dateStr, data.end_time || "10:00");
 
               if (!isNaN(startTime.getTime())) {
                 eventsToCreate.push({
@@ -471,12 +480,26 @@ export default function Dashboard() {
 
         // Single event
         const date = data.date || todayStr;
-        const startTime = new Date(`${date}T${(data.start_time || "09:00").replace(".", ":")}:00`);
-        const endTime = new Date(`${date}T${(data.end_time || "10:00").replace(".", ":")}:00`);
+        const startTime = parseLocalDateTime(date, data.start_time || "09:00");
+        const endTime = parseLocalDateTime(date, data.end_time || "10:00");
 
         if (isNaN(startTime.getTime())) {
           return { success: false, message: `Invalid time format for event: ${data.title}` };
         }
+
+        // Check for conflicts
+        const { data: existingEvents } = await supabase
+          .from("calendar_events")
+          .select("id, title, start_time, end_time")
+          .eq("profile_id", profileId)
+          .gte("start_time", `${date}T00:00:00`)
+          .lt("start_time", `${date}T23:59:59`);
+
+        const conflictingEvents = (existingEvents || []).filter(e => {
+          const eStart = new Date(e.start_time).getTime();
+          const eEnd = new Date(e.end_time).getTime();
+          return startTime.getTime() < eEnd && endTime.getTime() > eStart;
+        });
 
         const { error } = await supabase.from("calendar_events").insert({
           profile_id: profileId,
@@ -490,6 +513,14 @@ export default function Dashboard() {
 
         if (error) return { success: false, message: `Failed to create event: ${error.message}` };
         await loadData();
+
+        if (conflictingEvents.length > 0) {
+          const conflictNames = conflictingEvents.map(e =>
+            `${e.title} (${format(new Date(e.start_time), "h:mm")} - ${format(new Date(e.end_time), "h:mma")})`
+          ).join(", ");
+          return { success: true, message: `Event created: ${data.title} on ${format(startTime, "EEE d MMM 'at' h:mma")}. Warning: conflicts with ${conflictNames}` };
+        }
+
         return { success: true, message: `Event created: ${data.title} on ${format(startTime, "EEE d MMM 'at' h:mma")}` };
       }
 
@@ -534,8 +565,8 @@ export default function Dashboard() {
       if (type === "reschedule_event") {
         if (!data.event_id) return { success: false, message: "No event ID to reschedule" };
         const date = data.date || todayStr;
-        const startTime = new Date(`${date}T${data.start_time}:00`);
-        const endTime = new Date(`${date}T${data.end_time}:00`);
+        const startTime = parseLocalDateTime(date, data.start_time || "09:00");
+        const endTime = parseLocalDateTime(date, data.end_time || "10:00");
         const { error } = await supabase.from("calendar_events")
           .update({ start_time: startTime.toISOString(), end_time: endTime.toISOString() })
           .eq("id", data.event_id);
