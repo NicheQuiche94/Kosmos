@@ -67,6 +67,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  isStatus?: boolean;
 }
 
 const WEEKLY_TEMPLATE: Record<number, ScheduleBlock[]> = {
@@ -323,106 +324,150 @@ export default function Dashboard() {
   };
 
   const processLogs = async (logData: any) => {
-    if (!logData?.logs?.length) return;
+    if (!logData?.logs?.length) return [];
+    console.log("Processing logs:", logData.logs);
+    console.log("Available habits:", allHabits.map((h: any) => h.title));
     const todayStr = format(new Date(), "yyyy-MM-dd");
+    const results: { type: string; name: string; success: boolean }[] = [];
+
     for (const log of logData.logs) {
       if (log.type === "habit") {
-        const habit = allHabits.find((h: any) =>
-          h.title.toLowerCase().includes(log.name.toLowerCase()) ||
-          log.name.toLowerCase().includes(h.title.toLowerCase())
-        );
+        const logName = log.name.toLowerCase().trim();
+
+        // Try exact match first, then partial, then word overlap
+        let habit = allHabits.find((h: any) => h.title.toLowerCase() === logName);
+        if (!habit) habit = allHabits.find((h: any) => h.title.toLowerCase().includes(logName));
+        if (!habit) habit = allHabits.find((h: any) => logName.includes(h.title.toLowerCase()));
+        if (!habit) {
+          const logWords = logName.split(" ").filter((w: string) => w.length > 3);
+          habit = allHabits.find((h: any) => {
+            const habitWords = h.title.toLowerCase().split(" ");
+            return logWords.some((w: string) => habitWords.some((hw: string) => hw.includes(w) || w.includes(hw)));
+          });
+        }
+
         if (habit) {
-          await supabase.from("habit_logs").upsert({
+          const { error } = await supabase.from("habit_logs").upsert({
             profile_id: profileId, habit_id: habit.id,
             logged_at: todayStr, value: log.value || "true",
             note: log.note || null, source: "chat",
           }, { onConflict: "habit_id,logged_at" });
-          setHabitLogs(prev => new Set([...prev, habit.id]));
+          if (!error) {
+            setHabitLogs(prev => new Set([...prev, habit.id]));
+            results.push({ type: "habit", name: habit.title, success: true });
+          } else {
+            results.push({ type: "habit", name: log.name, success: false });
+          }
+        } else {
+          results.push({ type: "habit", name: log.name, success: false });
         }
       }
+
       if (log.type === "metric") {
-        const metric = metrics.find((m: any) =>
-          m.name.toLowerCase().includes(log.name.toLowerCase()) ||
-          log.name.toLowerCase().includes(m.name.toLowerCase())
-        );
+        const logName = log.name.toLowerCase().trim();
+        let metric = metrics.find((m: any) => m.name.toLowerCase() === logName);
+        if (!metric) metric = metrics.find((m: any) => m.name.toLowerCase().includes(logName) || logName.includes(m.name.toLowerCase()));
+
         if (metric) {
-          await supabase.from("metric_logs").upsert({
+          const { error } = await supabase.from("metric_logs").upsert({
             profile_id: profileId, metric_id: metric.id,
             value: log.value, logged_at: todayStr,
             note: log.note || null, source: "chat",
           }, { onConflict: "metric_id,logged_at" });
+          results.push({ type: "metric", name: metric.name, success: !error });
+        } else {
+          results.push({ type: "metric", name: log.name, success: false });
         }
       }
     }
+
+    return results;
   };
 
-  const processAction = async (actionData: any) => {
+  const processAction = async (actionData: any): Promise<{ success: boolean; message: string }> => {
+    console.log("Processing action:", actionData);
     const { type, data } = actionData;
     const todayStr = format(new Date(), "yyyy-MM-dd");
 
-    if (type === "create_event") {
-      const date = data.date || todayStr;
-      const startTime = new Date(`${date}T${data.start_time || "09:00"}:00`);
-      const endTime = new Date(`${date}T${data.end_time || "10:00"}:00`);
+    try {
+      if (type === "create_event") {
+        const date = data.date || todayStr;
+        const startTime = new Date(`${date}T${(data.start_time || "09:00").replace(".", ":")}:00`);
+        const endTime = new Date(`${date}T${(data.end_time || "10:00").replace(".", ":")}:00`);
 
-      await supabase.from("calendar_events").insert({
-        profile_id: profileId,
-        title: data.title,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
-        event_type: data.event_type || "action",
-        source: "internal",
-        color: null,
-      });
-      loadData();
-    }
+        if (isNaN(startTime.getTime())) {
+          return { success: false, message: `Invalid time format for event: ${data.title}` };
+        }
 
-    if (type === "complete_action") {
-      if (data.action_id) {
-        await supabase.from("actions")
+        const { error } = await supabase.from("calendar_events").insert({
+          profile_id: profileId,
+          title: data.title,
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
+          event_type: data.event_type || "action",
+          source: "internal",
+          color: null,
+        });
+
+        if (error) return { success: false, message: `Failed to create event: ${error.message}` };
+        await loadData();
+        return { success: true, message: `Event created: ${data.title} on ${format(startTime, "EEE d MMM 'at' h:mma")}` };
+      }
+
+      if (type === "complete_action") {
+        if (!data.action_id) return { success: false, message: "No action ID provided" };
+        const { error } = await supabase.from("actions")
           .update({ status: "completed", completed_at: new Date().toISOString() })
           .eq("id", data.action_id);
+        if (error) return { success: false, message: `Failed to complete action: ${error.message}` };
         setTodayActions(prev => prev.filter(a => a.id !== data.action_id));
+        return { success: true, message: "Action marked complete" };
       }
-    }
 
-    if (type === "dismiss_action") {
-      if (data.action_id) {
-        await supabase.from("actions")
+      if (type === "dismiss_action") {
+        if (!data.action_id) return { success: false, message: "No action ID provided" };
+        const { error } = await supabase.from("actions")
           .update({ status: "dismissed" })
           .eq("id", data.action_id);
+        if (error) return { success: false, message: `Failed to dismiss action: ${error.message}` };
         setTodayActions(prev => prev.filter(a => a.id !== data.action_id));
+        return { success: true, message: "Action dismissed" };
       }
-    }
 
-    if (type === "create_action") {
-      const lifeArea = areas.find((a: any) =>
-        a.name.toLowerCase().includes((data.life_area || "").toLowerCase())
-      );
-      await supabase.from("actions").insert({
-        profile_id: profileId,
-        life_area_id: lifeArea?.id || null,
-        title: data.title,
-        due_date: data.date || todayStr,
-        status: "pending",
-        priority: data.priority || "medium",
-        recurring: false,
-      });
-      loadData();
-    }
+      if (type === "create_action") {
+        const lifeArea = areas.find((a: any) =>
+          a.name.toLowerCase().includes((data.life_area || "").toLowerCase())
+        );
+        const { error } = await supabase.from("actions").insert({
+          profile_id: profileId,
+          life_area_id: lifeArea?.id || null,
+          title: data.title,
+          due_date: data.date || todayStr,
+          status: "pending",
+          priority: data.priority || "medium",
+          recurring: false,
+        });
+        if (error) return { success: false, message: `Failed to create action: ${error.message}` };
+        await loadData();
+        return { success: true, message: `Action added: ${data.title}` };
+      }
 
-    if (type === "reschedule_event") {
-      if (data.event_id && data.date && data.start_time && data.end_time) {
-        const startTime = new Date(`${data.date}T${data.start_time}:00`);
-        const endTime = new Date(`${data.date}T${data.end_time}:00`);
-        await supabase.from("calendar_events")
-          .update({
-            start_time: startTime.toISOString(),
-            end_time: endTime.toISOString(),
-          })
+      if (type === "reschedule_event") {
+        if (!data.event_id) return { success: false, message: "No event ID to reschedule" };
+        const date = data.date || todayStr;
+        const startTime = new Date(`${date}T${data.start_time}:00`);
+        const endTime = new Date(`${date}T${data.end_time}:00`);
+        const { error } = await supabase.from("calendar_events")
+          .update({ start_time: startTime.toISOString(), end_time: endTime.toISOString() })
           .eq("id", data.event_id);
-        loadData();
+        if (error) return { success: false, message: `Failed to reschedule: ${error.message}` };
+        await loadData();
+        return { success: true, message: `Rescheduled to ${format(startTime, "h:mma")}` };
       }
+
+      return { success: false, message: `Unknown action type: ${type}` };
+    } catch (e: any) {
+      return { success: false, message: `Error: ${e.message}` };
     }
   };
 
@@ -491,17 +536,42 @@ export default function Dashboard() {
         .replace(/<journal>[\s\S]*?<\/journal>/g, "")
         .trim();
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: displayContent }]);
-      if (logData) await processLogs(logData);
+
+      // Process operations and collect results
+      const logResults = logData ? await processLogs(logData) : [];
+
+      let actionResult: { success: boolean; message: string } | null = null;
       const actionMatch = rawContent.match(/<action>([\s\S]*?)<\/action>/);
       if (actionMatch) {
         try {
           const actionData = JSON.parse(actionMatch[1].trim());
-          await processAction(actionData);
+          actionResult = await processAction(actionData);
         } catch (e) {
-          console.error("Failed to parse action data", e);
+          actionResult = { success: false, message: "Failed to parse action" };
         }
       }
+
       await processJournal(rawContent);
+
+      // Build status message
+      const statusLines: string[] = [];
+      if (logResults && logResults.length > 0) {
+        const successful = logResults.filter(r => r.success);
+        const failed = logResults.filter(r => !r.success);
+        if (successful.length > 0) statusLines.push(`Logged: ${successful.map(r => r.name).join(", ")}`);
+        if (failed.length > 0) statusLines.push(`Could not find: ${failed.map(r => r.name).join(", ")}`);
+      }
+      if (actionResult) {
+        statusLines.push(actionResult.success ? actionResult.message : `Action failed: ${actionResult.message}`);
+      }
+      if (statusLines.length > 0) {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 2).toString(),
+          role: "assistant" as const,
+          content: statusLines.join("\n"),
+          isStatus: true,
+        }]);
+      }
     } catch {
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: "Something went wrong. Please try again." }]);
     } finally {
@@ -518,7 +588,7 @@ export default function Dashboard() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); sendMessage(); }
   };
 
   const remainingHabits = habits.filter(h => !habitLogs.has(h.id));
@@ -573,21 +643,47 @@ export default function Dashboard() {
               borderRadius: "18px 18px 0 0",
               padding: "18px 20px 14px",
               display: "flex", flexDirection: "column", gap: "10px",
-              maxHeight: "400px", overflowY: "auto",
+              height: "320px", maxHeight: "320px",
+              overflowY: "auto", overflowX: "hidden",
               boxShadow: "0 -2px 20px rgba(0,0,0,0.06)",
+              scrollBehavior: "smooth",
             }}>
               {messages.map((message) => (
                 <div key={message.id} style={{ display: "flex", justifyContent: message.role === "user" ? "flex-end" : "flex-start" }}>
-                  <div style={{
-                    maxWidth: "84%",
-                    background: message.role === "user" ? GRADIENT : "rgba(255,255,255,0.7)",
-                    color: message.role === "user" ? "#fff" : "#111827",
-                    borderRadius: message.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
-                    padding: "11px 15px", fontSize: "13px", lineHeight: 1.55,
-                    border: message.role === "assistant" ? "1px solid rgba(255,255,255,0.6)" : "none",
-                  }}>
-                    {message.content}
-                  </div>
+                  {message.isStatus ? (
+                    <div style={{
+                      maxWidth: "84%",
+                      backgroundColor: "rgba(74,140,111,0.12)",
+                      border: "1px solid rgba(74,140,111,0.25)",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      fontSize: "11px",
+                      color: "#374151",
+                      lineHeight: 1.5,
+                      fontFamily: "Inter, sans-serif",
+                    }}>
+                      {message.content.split("\n").map((line, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <div style={{
+                            width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0,
+                            backgroundColor: line.includes("failed") || line.includes("Could not") ? "#DC2626" : "#4A8C6F",
+                          }} />
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{
+                      maxWidth: "84%",
+                      background: message.role === "user" ? GRADIENT : "rgba(255,255,255,0.7)",
+                      color: message.role === "user" ? "#fff" : "#111827",
+                      borderRadius: message.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
+                      padding: "11px 15px", fontSize: "13px", lineHeight: 1.55,
+                      border: message.role === "assistant" ? "1px solid rgba(255,255,255,0.6)" : "none",
+                    }}>
+                      {message.content}
+                    </div>
+                  )}
                 </div>
               ))}
               {loading && (
