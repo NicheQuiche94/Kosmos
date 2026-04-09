@@ -4,7 +4,10 @@
       "Bash(npm run:*)",
       "Bash(npx next:*)",
       "Bash(npx tsc:*)",
-      "Bash(taskkill /PID 28080 /F)"
+      "Bash(taskkill /PID 28080 /F)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)"
     ]
   }
 }

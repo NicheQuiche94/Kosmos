@@ -99,6 +99,7 @@ export default function InsightsPage() {
   const [correlations, setCorrelations] = useState<{ habitA: string; habitB: string; pct: number }[]>([]);
   const [energyData, setEnergyData] = useState<{ date: string; level: number }[]>([]);
   const [journalFeed, setJournalFeed] = useState<any[]>([]);
+  const [diaryEntries, setDiaryEntries] = useState<any[]>([]);
 
   const loadData = useCallback(async () => {
     if (!profileId) return;
@@ -123,6 +124,14 @@ export default function InsightsPage() {
 
     setSentimentData(sentimentWeek || []);
     setJournalFeed(journalRecent || []);
+
+    const { data: diaryData } = await supabase
+      .from("diary_entries")
+      .select("*")
+      .eq("profile_id", profileId)
+      .gte("date", thirtyDaysAgo)
+      .order("date", { ascending: false });
+    setDiaryEntries(diaryData || []);
 
     // Energy trend
     const energyPoints = (energyEntries || [])
@@ -597,6 +606,79 @@ Response format:
                   )}
                 </div>
               </>
+            )}
+          </div>
+        </Card>
+
+        {/* Section 6: Daily Diary */}
+        <Card>
+          <CardHeader title="Daily Diary" />
+          <div style={{ padding: "10px 0" }}>
+            {diaryEntries.length === 0 ? (
+              <p style={{ fontSize: "13px", color: "#6B7280", textAlign: "center", padding: "18px 16px" }}>
+                Your diary will appear here after your first debrief. Start tonight.
+              </p>
+            ) : (
+              diaryEntries.map((entry: any, i: number) => {
+                const moodColor =
+                  entry.mood === "positive" ? "#4A8C6F"
+                  : entry.mood === "negative" ? "#DC2626"
+                  : entry.mood === "mixed" ? "#D97706"
+                  : "#9CA3AF";
+                return (
+                  <div key={entry.id || i} style={{
+                    padding: "14px 16px",
+                    borderBottom: i < diaryEntries.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                      <div style={{
+                        width: "10px", height: "10px", borderRadius: "50%",
+                        backgroundColor: moodColor, flexShrink: 0,
+                      }} />
+                      <h3 style={{
+                        fontFamily: '"Cal Sans", Inter, sans-serif',
+                        fontSize: "14px", fontWeight: 600, color: "#111827", margin: 0, flex: 1,
+                      }}>
+                        {format(parseISO(entry.date), "EEEE, d MMMM")}
+                      </h3>
+                      {entry.energy != null && (
+                        <span style={{
+                          fontSize: "10px", fontWeight: 600,
+                          padding: "2px 8px", borderRadius: "99px",
+                          backgroundColor: "#2C5F8A18", color: "#2C5F8A",
+                        }}>
+                          Energy: {entry.energy}/10
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: "12px", color: "#374151", lineHeight: 1.5, margin: "0 0 8px" }}>
+                      {entry.summary}
+                    </p>
+                    {(entry.highlights?.length > 0 || entry.challenges?.length > 0) && (
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                        {(entry.highlights || []).map((h: string, j: number) => (
+                          <span key={`h-${j}`} style={{
+                            fontSize: "10px", fontWeight: 500,
+                            padding: "3px 9px", borderRadius: "99px",
+                            backgroundColor: "#4A8C6F18", color: "#4A8C6F",
+                          }}>
+                            {h}
+                          </span>
+                        ))}
+                        {(entry.challenges || []).map((c: string, j: number) => (
+                          <span key={`c-${j}`} style={{
+                            fontSize: "10px", fontWeight: 500,
+                            padding: "3px 9px", borderRadius: "99px",
+                            backgroundColor: "#DC262618", color: "#DC2626",
+                          }}>
+                            {c}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </Card>

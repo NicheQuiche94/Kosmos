@@ -144,9 +144,20 @@ export default function ChatLog() {
     setLoading(true);
 
     try {
+      const stripTags = (content: string) =>
+        content
+          .replace(/<log>[\s\S]*?<\/log>/g, "")
+          .replace(/<action>[\s\S]*?<\/action>/g, "")
+          .replace(/<journal>[\s\S]*?<\/journal>/g, "")
+          .trim();
+
       const conversationHistory = messages
         .filter(m => m.id !== "welcome")
-        .map(m => ({ role: m.role, content: m.content }));
+        .map(m => ({
+          role: m.role,
+          content: typeof m.content === "string" ? stripTags(m.content) : m.content,
+        }))
+        .filter(m => typeof m.content === "string" ? m.content.length > 0 : true);
 
       const response = await fetch("/api/chat", {
         method: "POST",

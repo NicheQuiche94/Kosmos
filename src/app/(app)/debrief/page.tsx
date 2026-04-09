@@ -9,16 +9,42 @@ import { format } from "date-fns";
 
 const GRADIENT = "linear-gradient(135deg, #2C5F8A 0%, #3B7FAD 50%, #4A9B8E 100%)";
 
-const SYSTEM_PROMPT = `You are Kosmos running an end-of-day debrief with Andre. Your job is to review his day, celebrate what he completed, and specifically ask about anything he forgot to log. Be warm, direct, and efficient. No em-dashes. No emojis. Keep each message concise.
+const SYSTEM_PROMPT = `You are Kosmos running Andre's end-of-day debrief. Your tone is warm, curious, and direct. No em-dashes. No emojis.
 
-Your debrief structure:
-1. Open with a brief acknowledgment of what he did complete today (habits, metrics logged)
-2. Ask specifically about each missed item -- one or two at a time, not all at once
-3. Log anything he tells you using the same <log> tag format
-4. End with a brief encouraging close and remind him of his 10pm bedtime
+DEBRIEF STRUCTURE -- follow this order strictly:
 
-<log> format:
-{"logs": [{"type": "habit", "name": "...", "value": "true"}, {"type": "metric", "name": "...", "value": 123}]}
+1. OPEN QUESTION (always first, regardless of data)
+   Start with: "How was your day, Andre? Anything stand out across any of your life areas -- work, health, relationships, anything?"
+   Wait for their response. Listen genuinely. Acknowledge what they share.
+
+2. FOLLOW UP (based on their response)
+   Ask one specific follow-up based on what they said. Keep it natural, not clinical.
+
+3. LOGGING GAPS (after the open conversation)
+   Now review what wasn't logged today. Ask about 2-3 missed items at a time, not all at once.
+
+4. CLOSE
+   Brief encouraging close. Reference something specific they mentioned.
+   Remind them: 10pm bedtime.
+
+JOURNAL CAPTURE
+After the open conversation section (steps 1-2), extract a diary entry from what the user shared. Include this at the end of your response using a <diary> tag:
+
+<diary>
+{
+  "date": "yyyy-MM-dd",
+  "summary": "2-3 sentence narrative summary of how the day went, in third person as if written about Andre",
+  "highlights": ["thing that went well", "thing that stood out"],
+  "challenges": ["anything difficult or missed"],
+  "mood": "positive|neutral|negative|mixed",
+  "energy": 1-10
+}
+</diary>
+
+Only include the diary tag after the user has responded to the open question -- not on the first message. Strip the diary tag from display.
+
+LOGGING -- use <log> tag when logging missed items:
+<log>{"logs": [{"type": "habit", "name": "...", "value": "true"}]}</log>
 
 If nothing to log, include <log>{"logs":[]}</log>.
 
@@ -165,26 +191,40 @@ export default function DebriefPage() {
         sleepLogged,
       };
 
-      // Construct the initial user message from summary
-      const summaryMessage = [
-        `Today's summary:`,
-        `Completed habits: ${summary.habitsCompleted.length > 0 ? summary.habitsCompleted.join(", ") : "none"}.`,
-        `Missed habits: ${summary.habitsMissed.length > 0 ? summary.habitsMissed.join(", ") : "none"}.`,
-        `Metrics logged: ${summary.metricsLogged.length > 0 ? summary.metricsLogged.join(", ") : "none"}.`,
-        `Metrics not logged: ${summary.metricsMissed.length > 0 ? summary.metricsMissed.join(", ") : "none"}.`,
-        `Food logged: ${summary.foodLogged ? "yes" : "no"}.`,
-        `Rule of 100: ${summary.rule100Logged ? "logged" : "not logged"}.`,
-        `Please start the debrief.`,
-      ].join(" ");
+      const initialUserMessage = `Starting debrief. Today's data context (use this for the logging gaps section later, not now): Completed habits: ${summary.habitsCompleted.join(", ") || "none"}. Missed habits: ${summary.habitsMissed.join(", ") || "none"}. Metrics logged: ${summary.metricsLogged.join(", ") || "none"}. Metrics not logged: ${summary.metricsMissed.join(", ") || "none"}. Food logged: ${summary.foodLogged ? "yes" : "no"}. Rule of 100: ${summary.rule100Logged ? "logged" : "not logged"}. Please start with the open question.`;
 
-      // Call AI with the summary as the initial user message
+      // Call AI with the initial user message
       setLoading(true);
       try {
-        const rawContent = await callAI([{ role: "user", content: summaryMessage }]);
+        const rawContent = await callAI([{ role: "user", content: initialUserMessage }]);
         const logMatch = rawContent.match(/<log>([\s\S]*?)<\/log>/);
         let logData = null;
         if (logMatch) { try { logData = JSON.parse(logMatch[1].trim()); } catch (e) {} }
-        const displayContent = rawContent.replace(/<log>[\s\S]*?<\/log>/g, "").replace(/<journal>[\s\S]*?<\/journal>/g, "").trim();
+
+        const diaryMatch = rawContent.match(/<diary>([\s\S]*?)<\/diary>/);
+        if (diaryMatch) {
+          try {
+            const diaryData = JSON.parse(diaryMatch[1].trim());
+            await supabase.from("diary_entries").upsert({
+              profile_id: profileId,
+              date: diaryData.date || todayStr,
+              summary: diaryData.summary,
+              highlights: diaryData.highlights || [],
+              challenges: diaryData.challenges || [],
+              mood: diaryData.mood || "neutral",
+              energy: diaryData.energy || null,
+            }, { onConflict: "profile_id,date" });
+          } catch (e) {
+            console.error("Failed to parse diary entry", e);
+          }
+        }
+
+        const displayContent = rawContent
+          .replace(/<log>[\s\S]*?<\/log>/g, "")
+          .replace(/<action>[\s\S]*?<\/action>/g, "")
+          .replace(/<journal>[\s\S]*?<\/journal>/g, "")
+          .replace(/<diary>[\s\S]*?<\/diary>/g, "")
+          .trim();
 
         setMessages([{ id: "debrief-1", role: "assistant", content: displayContent }]);
         if (logData) await processLogs(logData);
@@ -214,14 +254,51 @@ export default function DebriefPage() {
     if (inputRef.current) inputRef.current.style.height = "auto";
 
     try {
-      const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
+      const stripTags = (content: string) =>
+        content
+          .replace(/<log>[\s\S]*?<\/log>/g, "")
+          .replace(/<action>[\s\S]*?<\/action>/g, "")
+          .replace(/<journal>[\s\S]*?<\/journal>/g, "")
+          .replace(/<diary>[\s\S]*?<\/diary>/g, "")
+          .trim();
+      const history = messages
+        .slice(-10)
+        .map((m) => ({
+          role: m.role,
+          content: typeof m.content === "string" ? stripTags(m.content) : m.content,
+        }))
+        .filter((m) => typeof m.content === "string" ? m.content.length > 0 : true);
       history.push({ role: "user", content: input.trim() });
 
       const rawContent = await callAI(history);
       const logMatch = rawContent.match(/<log>([\s\S]*?)<\/log>/);
       let logData = null;
       if (logMatch) { try { logData = JSON.parse(logMatch[1].trim()); } catch (e) {} }
-      const displayContent = rawContent.replace(/<log>[\s\S]*?<\/log>/g, "").replace(/<journal>[\s\S]*?<\/journal>/g, "").trim();
+
+      const diaryMatch = rawContent.match(/<diary>([\s\S]*?)<\/diary>/);
+      if (diaryMatch) {
+        try {
+          const diaryData = JSON.parse(diaryMatch[1].trim());
+          await supabase.from("diary_entries").upsert({
+            profile_id: profileId,
+            date: diaryData.date || todayStr,
+            summary: diaryData.summary,
+            highlights: diaryData.highlights || [],
+            challenges: diaryData.challenges || [],
+            mood: diaryData.mood || "neutral",
+            energy: diaryData.energy || null,
+          }, { onConflict: "profile_id,date" });
+        } catch (e) {
+          console.error("Failed to parse diary entry", e);
+        }
+      }
+
+      const displayContent = rawContent
+        .replace(/<log>[\s\S]*?<\/log>/g, "")
+        .replace(/<action>[\s\S]*?<\/action>/g, "")
+        .replace(/<journal>[\s\S]*?<\/journal>/g, "")
+        .replace(/<diary>[\s\S]*?<\/diary>/g, "")
+        .trim();
 
       setMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: displayContent }]);
       if (logData) await processLogs(logData);

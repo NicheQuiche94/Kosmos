@@ -7,6 +7,7 @@ import {
   Dumbbell, Briefcase, PoundSterling, Heart,
   BookOpen, Music, Home, Send, Camera,
   CheckCircle2, MessageCircle, Loader2, Plus, ChevronRight,
+  XCircle, Zap,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { logHabit, completeAction } from "@/lib/data";
@@ -195,9 +196,14 @@ LOGGING -- always end response with <log> tag:
 If nothing to log: <log>{"logs": []}</log>
 
 ACTIONS -- when user asks to create, move, complete or dismiss something, include <action> tag:
+- mark_missed: use when user says they didn't do something, skipped it, or missed it
+  {"type": "mark_missed", "data": {"habit_name": "habit title or null", "action_id": "uuid or null"}}
+- For ad-hoc tasks with no specific life area, use create_action with life_area: "adhoc" or life_area: null
+- Examples: "remind me to call the accountant" -> create_action, no life area
+- "add to my ad-hoc list -- check the invoice" -> create_action, no life area
 <action>
 {
-  "type": "create_event|complete_action|dismiss_action|reschedule_event|create_action",
+  "type": "create_event|complete_action|dismiss_action|reschedule_event|create_action|mark_missed",
   "data": {
     "title": "event or action title",
     "date": "yyyy-MM-dd (use actual upcoming date, never a past date, today is ${format(new Date(), "yyyy-MM-dd")})",
@@ -296,6 +302,9 @@ export default function Dashboard() {
   const [pendingEvent, setPendingEvent] = useState<PendingEvent | null>(null);
   const [conversationId, setConversationId] = useState<string>("");
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [adHocInput, setAdHocInput] = useState("");
+  const [adHocExpanded, setAdHocExpanded] = useState(false);
+  const [adHocActions, setAdHocActions] = useState<any[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -324,7 +333,18 @@ export default function Dashboard() {
     setHabitLogs(new Set(logsData?.map((l: any) => l.habit_id) || []));
     setAreas(areasData || []);
     setMetrics(metricsData || []);
-    setTodayActions(actionsData || []);
+    setTodayActions((actionsData || []).filter((a: any) => a.life_area_id));
+
+    const { data: adHocData } = await supabase
+      .from("actions")
+      .select("*")
+      .eq("profile_id", profileId)
+      .is("life_area_id", null)
+      .neq("status", "completed")
+      .neq("status", "dismissed")
+      .order("created_at", { ascending: false });
+
+    setAdHocActions(adHocData || []);
 
     // Map calendar events to schedule blocks, fall back to weekly template
     const mapped: ScheduleBlock[] = (calendarData || []).map((e: any) => ({
@@ -412,6 +432,46 @@ export default function Dashboard() {
 
   const handleCompleteAction = async (actionId: string) => {
     await completeAction(actionId);
+    setTodayActions(prev => prev.filter(a => a.id !== actionId));
+  };
+
+  const handleMissHabit = async (habitId: string) => {
+    await supabase.from("habit_logs").upsert({
+      profile_id: profileId,
+      habit_id: habitId,
+      logged_at: todayStr,
+      value: "missed",
+      source: "manual",
+    }, { onConflict: "habit_id,logged_at" });
+    setHabits(prev => prev.filter(h => h.id !== habitId));
+  };
+
+  const handleAddAdHoc = async () => {
+    if (!adHocInput.trim()) return;
+    const { data } = await supabase.from("actions").insert({
+      profile_id: profileId,
+      life_area_id: null,
+      title: adHocInput.trim(),
+      due_date: todayStr,
+      status: "pending",
+      priority: "medium",
+      recurring: false,
+    }).select().single();
+
+    if (data) {
+      setAdHocActions(prev => [data, ...prev]);
+      setAdHocInput("");
+      setAdHocExpanded(false);
+    }
+  };
+
+  const handleMissAction = async (actionId: string) => {
+    await supabase.from("actions")
+      .update({
+        status: "dismissed",
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", actionId);
     setTodayActions(prev => prev.filter(a => a.id !== actionId));
   };
 
@@ -696,6 +756,33 @@ export default function Dashboard() {
         return { success: true, message: `Action added: ${data.title}` };
       }
 
+      if (type === "mark_missed") {
+        if (data.habit_name) {
+          const habit = allHabits.find((h: any) =>
+            h.title.toLowerCase().includes(data.habit_name.toLowerCase()) ||
+            data.habit_name.toLowerCase().includes(h.title.toLowerCase())
+          );
+          if (habit) {
+            await supabase.from("habit_logs").upsert({
+              profile_id: profileId,
+              habit_id: habit.id,
+              logged_at: todayStr,
+              value: "missed",
+              source: "chat",
+            }, { onConflict: "habit_id,logged_at" });
+            setHabits(prev => prev.filter(h => h.id !== habit.id));
+            return { success: true, message: `${habit.title} marked as missed today` };
+          }
+          return { success: false, message: `Could not find habit: ${data.habit_name}` };
+        }
+        if (data.action_id) {
+          await supabase.from("actions").update({ status: "dismissed" }).eq("id", data.action_id);
+          setTodayActions(prev => prev.filter(a => a.id !== data.action_id));
+          return { success: true, message: "Action marked as missed" };
+        }
+        return { success: false, message: "No habit or action specified" };
+      }
+
       if (type === "reschedule_event") {
         if (!data.event_id) return { success: false, message: "No event ID to reschedule" };
         const date = data.date || todayStr;
@@ -755,10 +842,21 @@ export default function Dashboard() {
     }
 
     try {
+      const stripTags = (content: string) =>
+        content
+          .replace(/<log>[\s\S]*?<\/log>/g, "")
+          .replace(/<action>[\s\S]*?<\/action>/g, "")
+          .replace(/<journal>[\s\S]*?<\/journal>/g, "")
+          .trim();
+
       const history = messages
         .filter(m => !m.isStatus && !m.isConflict && m.id !== "welcome")
         .slice(-20)
-        .map(m => ({ role: m.role, content: m.content }));
+        .map(m => ({
+          role: m.role,
+          content: typeof m.content === "string" ? stripTags(m.content) : m.content,
+        }))
+        .filter(m => typeof m.content === "string" ? m.content.length > 0 : true);
       const userContent: any = imageBase64
         ? [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageBase64 } },
@@ -1199,7 +1297,7 @@ export default function Dashboard() {
 
           const areaEntries = Object.entries(areaMap);
 
-          if (areaEntries.length === 0 && completedCount === totalCount && todayActions.length === 0) {
+          if (areaEntries.length === 0 && completedCount === totalCount && todayActions.length === 0 && adHocActions.length === 0) {
             return (
               <Card style={{ padding: "32px 20px", textAlign: "center" }}>
                 <CheckCircle2 size={28} color="#4A8C6F" style={{ margin: "0 auto 10px" }} />
@@ -1270,6 +1368,19 @@ export default function Dashboard() {
                               <CheckCircle2 size={18} />
                             </button>
                             <button
+                              title="Mark as missed"
+                              onClick={() => handleMissHabit(habit.id)}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                padding: "4px", borderRadius: "6px", display: "flex", alignItems: "center",
+                                transition: "color 0.15s", color: "#9CA3AF",
+                              }}
+                              onMouseEnter={e => (e.currentTarget.style.color = "#DC2626")}
+                              onMouseLeave={e => (e.currentTarget.style.color = "#9CA3AF")}
+                            >
+                              <XCircle size={18} />
+                            </button>
+                            <button
                               title="Log in chat"
                               onClick={() => {
                                 setSelectedArea(areaName);
@@ -1324,6 +1435,19 @@ export default function Dashboard() {
                               <CheckCircle2 size={18} />
                             </button>
                             <button
+                              title="Mark as missed"
+                              onClick={() => handleMissAction(action.id)}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                padding: "4px", borderRadius: "6px", display: "flex", alignItems: "center",
+                                transition: "color 0.15s", color: "#9CA3AF",
+                              }}
+                              onMouseEnter={e => (e.currentTarget.style.color = "#DC2626")}
+                              onMouseLeave={e => (e.currentTarget.style.color = "#9CA3AF")}
+                            >
+                              <XCircle size={18} />
+                            </button>
+                            <button
                               title="Log in chat"
                               onClick={() => {
                                 setSelectedArea(areaName);
@@ -1365,6 +1489,150 @@ export default function Dashboard() {
                   </Card>
                 );
               })}
+
+              {/* Ad-Hoc card (always rendered) */}
+              <div style={{
+                backgroundColor: CARD_BG,
+                backdropFilter: "blur(20px)",
+                WebkitBackdropFilter: "blur(20px)",
+                border: `1px solid ${CARD_BORDER}`,
+                borderRadius: "18px",
+                boxShadow: CARD_SHADOW,
+                overflow: "hidden",
+                minWidth: "220px",
+                maxWidth: "220px",
+                flexShrink: 0,
+              }}>
+                <div style={{
+                  background: "linear-gradient(135deg, #6B7280 0%, #9CA3AF 100%)",
+                  padding: "10px 12px",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                    <Zap size={14} color="#fff" />
+                    <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "12px", fontWeight: 600, color: "#fff" }}>
+                      Ad-Hoc
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: "10px", fontWeight: 700, color: "#fff",
+                    backgroundColor: "rgba(255,255,255,0.2)",
+                    padding: "2px 8px", borderRadius: "99px",
+                  }}>
+                    {adHocActions.length}
+                  </span>
+                </div>
+
+                <div style={{ overflowY: "auto", maxHeight: "220px" }}>
+                  {adHocActions.length === 0 && !adHocExpanded && (
+                    <p style={{ fontSize: "11px", color: "#9CA3AF", padding: "16px 14px", textAlign: "center" }}>
+                      Nothing ad-hoc today
+                    </p>
+                  )}
+                  {adHocActions.map((action: any) => (
+                    <div key={action.id} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "8px 12px",
+                    }}>
+                      <p style={{ fontSize: "11px", color: "#111827", fontWeight: 500, lineHeight: 1.3, flex: 1, minWidth: 0, marginRight: "6px" }}>
+                        {action.title}
+                      </p>
+                      <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                        <button
+                          title="Mark complete"
+                          onClick={async () => {
+                            await completeAction(action.id);
+                            setAdHocActions(prev => prev.filter(a => a.id !== action.id));
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: "3px", color: "#9CA3AF", transition: "color 0.15s" }}
+                          onMouseEnter={e => (e.currentTarget.style.color = "#4A8C6F")}
+                          onMouseLeave={e => (e.currentTarget.style.color = "#9CA3AF")}
+                        >
+                          <CheckCircle2 size={16} />
+                        </button>
+                        <button
+                          title="Mark as missed"
+                          onClick={async () => {
+                            await supabase.from("actions").update({ status: "dismissed" }).eq("id", action.id);
+                            setAdHocActions(prev => prev.filter(a => a.id !== action.id));
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: "3px", color: "#9CA3AF", transition: "color 0.15s" }}
+                          onMouseEnter={e => (e.currentTarget.style.color = "#DC2626")}
+                          onMouseLeave={e => (e.currentTarget.style.color = "#9CA3AF")}
+                        >
+                          <XCircle size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {adHocExpanded ? (
+                  <div style={{ padding: "8px 12px", borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+                    <input
+                      autoFocus
+                      value={adHocInput}
+                      onChange={e => setAdHocInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") handleAddAdHoc();
+                        if (e.key === "Escape") { setAdHocExpanded(false); setAdHocInput(""); }
+                      }}
+                      placeholder="Quick task..."
+                      style={{
+                        width: "100%", padding: "7px 10px",
+                        backgroundColor: "rgba(0,0,0,0.05)",
+                        border: "1px solid rgba(0,0,0,0.08)",
+                        borderRadius: "8px", fontSize: "11px",
+                        color: "#111827", outline: "none",
+                        fontFamily: "Inter, sans-serif",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                      <button
+                        onClick={() => { setAdHocExpanded(false); setAdHocInput(""); }}
+                        style={{
+                          flex: 1, padding: "5px",
+                          backgroundColor: "rgba(0,0,0,0.05)",
+                          border: "none", borderRadius: "6px",
+                          fontSize: "10px", color: "#9CA3AF", cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleAddAdHoc}
+                        style={{
+                          flex: 2, padding: "5px",
+                          background: "linear-gradient(135deg, #2C5F8A, #4A9B8E)",
+                          border: "none", borderRadius: "6px",
+                          fontSize: "10px", color: "#fff",
+                          fontWeight: 600, cursor: "pointer",
+                        }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAdHocExpanded(true)}
+                    style={{
+                      width: "100%", padding: "8px 12px",
+                      background: "none", border: "none",
+                      borderTop: "1px solid rgba(0,0,0,0.05)",
+                      cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: "4px",
+                      transition: "background-color 0.15s",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.03)")}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
+                  >
+                    <Plus size={12} color="#9CA3AF" />
+                    <span style={{ fontSize: "10px", color: "#9CA3AF" }}>Add task</span>
+                  </button>
+                )}
+              </div>
             </div>
           );
         })()}

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useProfileStore } from "@/store/profileStore";
 import { supabase } from "@/lib/supabase";
 import { format, subDays } from "date-fns";
-import { getFoodLogs, getDailyMacros } from "@/lib/conversations";
+import { getFoodLogs } from "@/lib/conversations";
 import {
   BarChart2, Flame, Beef, Wheat, Droplets,
   Activity, Footprints, Moon, Scale,
@@ -100,8 +100,8 @@ export default function AnalyticsPage() {
 
   const [foodLogs, setFoodLogs] = useState<any[]>([]);
   const [allFoodLogs, setAllFoodLogs] = useState<any[]>([]);
-  const [dailyMacros, setDailyMacros] = useState<any[]>([]);
   const [nutritionDate, setNutritionDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [nutritionView, setNutritionView] = useState<"day" | "week">("day");
   const [bodyMetrics, setBodyMetrics] = useState<any[]>([]);
   const [weightTrend, setWeightTrend] = useState<number[]>([]);
   const [bodyFatTrend, setBodyFatTrend] = useState<number[]>([]);
@@ -132,12 +132,8 @@ export default function AnalyticsPage() {
     setFoodLogs(foodData || []);
 
     // Load nutrition logbook data
-    const [allFoodData, macroData] = await Promise.all([
-      getFoodLogs(profileId, 30),
-      getDailyMacros(profileId, 14),
-    ]);
+    const allFoodData = await getFoodLogs(profileId, 30);
     setAllFoodLogs(allFoodData);
-    setDailyMacros(macroData);
 
     // Body metrics - latest value per metric
     const metrics = metricsData || [];
@@ -479,134 +475,269 @@ export default function AnalyticsPage() {
 
         {/* Section 5: Nutrition Logbook */}
         <GradientCard>
-          <CardHeader title="Nutrition Logbook" icon={<Beef size={14} color="#fff" />} />
-          <div style={{ padding: "16px" }}>
+          {/* Custom header with toggle */}
+          <div style={{
+            background: GRADIENT, padding: "12px 16px",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Beef size={14} color="#fff" />
+              <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", fontWeight: 600, color: "#fff", margin: 0 }}>
+                Nutrition Logbook
+              </h2>
+            </div>
+            <div style={{ display: "flex", gap: "4px", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: "8px", padding: "3px" }}>
+              {(["day", "week"] as const).map(v => (
+                <button key={v} onClick={() => setNutritionView(v)} style={{
+                  padding: "4px 12px", borderRadius: "6px", border: "none",
+                  cursor: "pointer", fontSize: "11px", fontWeight: 500,
+                  backgroundColor: nutritionView === v ? "#fff" : "transparent",
+                  color: nutritionView === v ? "#2C5F8A" : "rgba(255,255,255,0.8)",
+                  transition: "all 0.15s",
+                  textTransform: "capitalize",
+                }}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
 
-            {/* Daily macro summary bars */}
-            <p style={{ fontSize: "11px", fontWeight: 600, color: "#6B7280", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Last 7 days
-            </p>
-            {dailyMacros.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
-                {dailyMacros.slice(-7).reverse().map(day => {
-                  const proteinPct = Math.min((day.protein_g / 175) * 100, 100);
-                  const calPct = Math.min((day.calories / 2200) * 100, 100);
+          <div style={{ padding: "16px" }}>
+            {nutritionView === "day" && (
+              <>
+                {/* Day navigation */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                  <button onClick={() => {
+                    const d = new Date(nutritionDate + "T12:00:00");
+                    d.setDate(d.getDate() - 1);
+                    setNutritionDate(format(d, "yyyy-MM-dd"));
+                  }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
+                    Previous day
+                  </button>
+                  <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", color: "#111827" }}>
+                    {format(new Date(nutritionDate + "T12:00:00"), "EEEE, d MMMM")}
+                  </span>
+                  <button onClick={() => {
+                    const d = new Date(nutritionDate + "T12:00:00");
+                    d.setDate(d.getDate() + 1);
+                    setNutritionDate(format(d, "yyyy-MM-dd"));
+                  }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
+                    Next day
+                  </button>
+                </div>
+
+                {(() => {
+                  const dayFoodLogs = allFoodLogs.filter(f => f.logged_at === nutritionDate);
+                  const dayTotals = dayFoodLogs.reduce((acc, f) => ({
+                    calories: acc.calories + (f.calories || 0),
+                    protein_g: acc.protein_g + (f.protein_g || 0),
+                    carbs_g: acc.carbs_g + (f.carbs_g || 0),
+                    fat_g: acc.fat_g + (f.fat_g || 0),
+                  }), { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+
+                  if (dayFoodLogs.length === 0) {
+                    return (
+                      <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "16px 0" }}>
+                        No food logged for this day. Log meals in the Health chat.
+                      </p>
+                    );
+                  }
+
                   return (
-                    <div key={day.date} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <span style={{ fontSize: "10px", fontWeight: 600, color: "#9CA3AF", minWidth: "40px" }}>
-                        {format(new Date(day.date + "T12:00:00"), "EEE d")}
-                      </span>
-                      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "3px" }}>
+                    <>
+                      {/* Day totals */}
+                      <div style={{
+                        display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px",
+                        padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px", marginBottom: "12px",
+                      }}>
                         {[
-                          { label: "Protein", pct: proteinPct, color: "#4A8C6F", value: `${Math.round(day.protein_g)}g` },
-                          { label: "Calories", pct: calPct, color: "#2C5F8A", value: `${Math.round(day.calories)}` },
-                        ].map(bar => (
-                          <div key={bar.label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontSize: "9px", color: "#9CA3AF", minWidth: "44px" }}>{bar.label}</span>
-                            <div style={{ flex: 1, backgroundColor: "#F3F4F6", borderRadius: "99px", height: "5px" }}>
-                              <div style={{ width: `${bar.pct}%`, height: "5px", borderRadius: "99px", backgroundColor: bar.color, transition: "width 0.5s ease" }} />
-                            </div>
-                            <span style={{ fontSize: "9px", color: "#6B7280", minWidth: "30px", textAlign: "right" }}>{bar.value}</span>
+                          { label: "Cal", value: Math.round(dayTotals.calories), color: "#2C5F8A" },
+                          { label: "Pro", value: `${Math.round(dayTotals.protein_g)}g`, color: "#4A8C6F" },
+                          { label: "Carbs", value: `${Math.round(dayTotals.carbs_g)}g`, color: "#D97706" },
+                          { label: "Fat", value: `${Math.round(dayTotals.fat_g)}g`, color: "#7C3AED" },
+                        ].map(t => (
+                          <div key={t.label} style={{ textAlign: "center" }}>
+                            <div style={{ fontSize: "16px", fontWeight: 700, color: t.color, fontFamily: '"Cal Sans", Inter, sans-serif' }}>{t.value}</div>
+                            <div style={{ fontSize: "9px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>{t.label}</div>
                           </div>
                         ))}
                       </div>
-                    </div>
+
+                      {/* Individual entries */}
+                      {dayFoodLogs.map((f, i) => (
+                        <div key={f.id || i} style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          padding: "8px 0",
+                          borderBottom: i < dayFoodLogs.length - 1 ? "1px solid #F9FAFB" : "none",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>{f.food_name}</span>
+                            {f.meal_type && (
+                              <span style={{
+                                fontSize: "9px", fontWeight: 600, color: "#6B7280",
+                                backgroundColor: "#F3F4F6", padding: "2px 7px", borderRadius: "99px",
+                                textTransform: "capitalize",
+                              }}>
+                                {f.meal_type}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", gap: "10px", fontSize: "11px", color: "#9CA3AF" }}>
+                            <span>{f.calories || 0} kcal</span>
+                            <span>{f.protein_g || 0}p</span>
+                            <span>{f.carbs_g || 0}c</span>
+                            <span>{f.fat_g || 0}f</span>
+                          </div>
+                        </div>
+                      ))}
+                    </>
                   );
-                })}
-              </div>
-            ) : (
-              <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "8px 0", marginBottom: "16px" }}>
-                No nutrition data yet. Log meals in the Health chat.
-              </p>
+                })()}
+              </>
             )}
 
-            <div style={{ height: "1px", backgroundColor: "#F3F4F6", margin: "0 0 16px" }} />
+            {nutritionView === "week" && (() => {
+              // Calculate Monday of the week containing nutritionDate
+              const refDate = new Date(nutritionDate + "T12:00:00");
+              const dow = refDate.getDay(); // 0 = Sunday
+              const daysFromMonday = dow === 0 ? 6 : dow - 1;
+              const monday = new Date(refDate);
+              monday.setDate(refDate.getDate() - daysFromMonday);
 
-            {/* Food log entries by day */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-              <button onClick={() => {
-                const d = new Date(nutritionDate + "T12:00:00");
-                d.setDate(d.getDate() - 1);
-                setNutritionDate(format(d, "yyyy-MM-dd"));
-              }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
-                Previous day
-              </button>
-              <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", color: "#111827" }}>
-                {format(new Date(nutritionDate + "T12:00:00"), "EEEE, d MMMM")}
-              </span>
-              <button onClick={() => {
-                const d = new Date(nutritionDate + "T12:00:00");
-                d.setDate(d.getDate() + 1);
-                setNutritionDate(format(d, "yyyy-MM-dd"));
-              }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
-                Next day
-              </button>
-            </div>
-
-            {(() => {
-              const dayFoodLogs = allFoodLogs.filter(f => f.logged_at === nutritionDate);
-              const dayTotals = dayFoodLogs.reduce((acc, f) => ({
-                calories: acc.calories + (f.calories || 0),
-                protein_g: acc.protein_g + (f.protein_g || 0),
-                carbs_g: acc.carbs_g + (f.carbs_g || 0),
-                fat_g: acc.fat_g + (f.fat_g || 0),
-              }), { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
-
-              if (dayFoodLogs.length === 0) {
-                return (
-                  <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "16px 0" }}>
-                    No food logged for this day. Log meals in the Health chat.
-                  </p>
-                );
+              const days: { date: string; display: Date; dayName: string }[] = [];
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(monday);
+                d.setDate(monday.getDate() + i);
+                days.push({
+                  date: format(d, "yyyy-MM-dd"),
+                  display: d,
+                  dayName: format(d, "EEE d MMM"),
+                });
               }
+
+              const dayData = days.map(day => {
+                const logs = allFoodLogs.filter(f => f.logged_at === day.date);
+                const totals = logs.reduce((acc, f) => ({
+                  calories: acc.calories + (f.calories || 0),
+                  protein_g: acc.protein_g + (f.protein_g || 0),
+                  carbs_g: acc.carbs_g + (f.carbs_g || 0),
+                  fat_g: acc.fat_g + (f.fat_g || 0),
+                }), { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+                return { ...day, totals, count: logs.length };
+              });
+
+              const weekHasData = dayData.some(d => d.count > 0);
+              const totalCal = dayData.reduce((s, d) => s + d.totals.calories, 0);
+              const daysWithLogs = dayData.filter(d => d.count > 0);
+              const avgProtein = daysWithLogs.length > 0
+                ? Math.round(daysWithLogs.reduce((s, d) => s + d.totals.protein_g, 0) / daysWithLogs.length)
+                : 0;
+              const bestProteinDay = daysWithLogs.reduce<{ dayName: string; protein: number } | null>((best, d) =>
+                !best || d.totals.protein_g > best.protein
+                  ? { dayName: format(d.display, "EEE"), protein: Math.round(d.totals.protein_g) }
+                  : best,
+                null
+              );
+              const proteinTargetHits = dayData.filter(d => d.totals.protein_g >= 150).length;
+
+              const proteinDotColor = (p: number) => {
+                if (p >= 150) return "#4A8C6F";
+                if (p >= 100) return "#D97706";
+                return "#DC2626";
+              };
 
               return (
                 <>
-                  {/* Day totals */}
-                  <div style={{
-                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px",
-                    padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px", marginBottom: "12px",
-                  }}>
-                    {[
-                      { label: "Cal", value: Math.round(dayTotals.calories), color: "#2C5F8A" },
-                      { label: "Pro", value: `${Math.round(dayTotals.protein_g)}g`, color: "#4A8C6F" },
-                      { label: "Carbs", value: `${Math.round(dayTotals.carbs_g)}g`, color: "#D97706" },
-                      { label: "Fat", value: `${Math.round(dayTotals.fat_g)}g`, color: "#7C3AED" },
-                    ].map(t => (
-                      <div key={t.label} style={{ textAlign: "center" }}>
-                        <div style={{ fontSize: "16px", fontWeight: 700, color: t.color, fontFamily: '"Cal Sans", Inter, sans-serif' }}>{t.value}</div>
-                        <div style={{ fontSize: "9px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>{t.label}</div>
-                      </div>
-                    ))}
+                  {/* Week navigation */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+                    <button onClick={() => {
+                      const d = new Date(nutritionDate + "T12:00:00");
+                      d.setDate(d.getDate() - 7);
+                      setNutritionDate(format(d, "yyyy-MM-dd"));
+                    }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
+                      Previous week
+                    </button>
+                    <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "13px", color: "#111827" }}>
+                      {format(monday, "d MMM")} – {format(days[6].display, "d MMM")}
+                    </span>
+                    <button onClick={() => {
+                      const d = new Date(nutritionDate + "T12:00:00");
+                      d.setDate(d.getDate() + 7);
+                      setNutritionDate(format(d, "yyyy-MM-dd"));
+                    }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
+                      Next week
+                    </button>
                   </div>
 
-                  {/* Individual entries */}
-                  {dayFoodLogs.map((f, i) => (
-                    <div key={f.id || i} style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      padding: "8px 0",
-                      borderBottom: i < dayFoodLogs.length - 1 ? "1px solid #F9FAFB" : "none",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>{f.food_name}</span>
-                        {f.meal_type && (
-                          <span style={{
-                            fontSize: "9px", fontWeight: 600, color: "#6B7280",
-                            backgroundColor: "#F3F4F6", padding: "2px 7px", borderRadius: "99px",
-                            textTransform: "capitalize",
+                  {!weekHasData ? (
+                    <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "20px 0" }}>
+                      No food logged this week. Log meals in the Health chat.
+                    </p>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        {dayData.map(d => (
+                          <div key={d.date} style={{
+                            display: "flex", alignItems: "center", gap: "10px",
+                            padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px",
                           }}>
-                            {f.meal_type}
-                          </span>
-                        )}
+                            <div style={{
+                              width: "10px", height: "10px", borderRadius: "50%",
+                              backgroundColor: d.count > 0 ? proteinDotColor(d.totals.protein_g) : "#E5E7EB",
+                              flexShrink: 0,
+                            }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: "12px", fontWeight: 600, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                                {d.dayName}
+                              </div>
+                              <div style={{ fontSize: "10px", color: "#9CA3AF", marginTop: "2px" }}>
+                                {d.count > 0
+                                  ? `${Math.round(d.totals.calories)} kcal · ${Math.round(d.totals.protein_g)}p · ${Math.round(d.totals.carbs_g)}c · ${Math.round(d.totals.fat_g)}f`
+                                  : "No food logged"}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: "10px", color: "#6B7280", flexShrink: 0 }}>
+                              {d.count} {d.count === 1 ? "entry" : "entries"}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div style={{ display: "flex", gap: "10px", fontSize: "11px", color: "#9CA3AF" }}>
-                        <span>{f.calories || 0} kcal</span>
-                        <span>{f.protein_g || 0}p</span>
-                        <span>{f.carbs_g || 0}c</span>
-                        <span>{f.fat_g || 0}f</span>
+
+                      {/* Weekly summary */}
+                      <div style={{ height: "1px", backgroundColor: "#F3F4F6", margin: "16px 0 12px" }} />
+                      <p style={{ fontSize: "11px", fontWeight: 600, color: "#6B7280", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Weekly summary
+                      </p>
+                      <div style={{
+                        display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px",
+                      }}>
+                        <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
+                          <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Total calories</div>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#2C5F8A", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                            {Math.round(totalCal).toLocaleString()}
+                          </div>
+                        </div>
+                        <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
+                          <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Avg daily protein</div>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#4A8C6F", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                            {avgProtein}g
+                          </div>
+                        </div>
+                        <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
+                          <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Best protein day</div>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#4A8C6F", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                            {bestProteinDay ? `${bestProteinDay.dayName} ${bestProteinDay.protein}g` : "—"}
+                          </div>
+                        </div>
+                        <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
+                          <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Protein target hit</div>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#D97706", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                            {proteinTargetHits}/7 days
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    </>
+                  )}
                 </>
               );
             })()}
