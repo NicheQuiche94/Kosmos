@@ -2,7 +2,7 @@
 
 import { useProfileStore } from "@/store/profileStore";
 import { useEffect, useState, useCallback, useRef } from "react";
-import { format, addDays, parseISO } from "date-fns";
+import { format, addDays, parseISO, startOfWeek } from "date-fns";
 import {
   Dumbbell, Briefcase, PoundSterling, Heart,
   BookOpen, Music, Home, Send, Camera,
@@ -171,49 +171,94 @@ const WEEKLY_TEMPLATE: Record<number, ScheduleBlock[]> = {
   ],
 };
 
-const getSystemPrompt = () => `You are Kosmos, Andre's personal life operating system. You can log data AND take actions inside the app. You are warm, direct, and efficient. No em-dashes. No emojis.
+const getSystemPrompt = () => {
+  const todayDateStr = format(new Date(), "EEEE yyyy-MM-dd");
+  return `You are Kosmos, Andre's personal life operating system. You can log data AND take actions inside the app. You are warm, direct, and efficient. No em-dashes. No emojis.
 
-Today is ${format(new Date(), "EEEE, yyyy-MM-dd")}.
+Today is ${todayDateStr}.
 When the user says a day name like "Tuesday", calculate the actual date of the next Tuesday from today and use that yyyy-MM-dd date.
-Never offset the date. If today is Sunday 6 Apr and the user says Tuesday, the date is 2026-04-08.
-Double-check: the day name of your chosen date must match what the user requested.
+Never offset the date. Double-check: the day name of your chosen date must match what the user requested.
 
 Andre's profile:
 - Self-employed, building MakersForge (recruitment), Seedcraft (venture studio: Shiftly, Smokeless, Escapage, Vent), Harika Labs (HiddenGem, Playfeed)
 - Lives in Auchterarder, Scotland with partner Amy and two young kids
 - Goals: 13-15% body fat, 70kg lean mass, 5k sub 25 mins, 150-200g protein daily, eliminate fizzy drinks, 10pm bedtime, 10k steps, YouTube channel, Rule of 100 marketing actions daily
 
-WHAT YOU CAN DO:
-1. Log habits, metrics, food -- use <log> tag
-2. Create calendar events -- use <action> tag
-3. Complete or dismiss actions -- use <action> tag
-4. Answer questions about today's schedule, habits, progress
-5. Move/reschedule calendar blocks -- use <action> tag
-6. Capture journal/sentiment -- use <journal> tag
-
 LOGGING -- always end response with <log> tag:
 <log>{"logs": [{"type": "habit", "name": "...", "value": "true"}, {"type": "metric", "name": "...", "value": 123}, {"type": "food", "name": "food name", "calories": 450, "protein": 35, "carbs": 40, "fat": 12, "meal_type": "breakfast|lunch|dinner|snack"}]}</log>
 If nothing to log: <log>{"logs": []}</log>
 
-ACTIONS -- when user asks to create, move, complete or dismiss something, include <action> tag:
-- mark_missed: use when user says they didn't do something, skipped it, or missed it
+JOURNAL -- only when genuine emotion or reflection is present:
+<journal>{"content": "...", "sentiment": "positive|neutral|negative|mixed", "energy_level": 1-10 or null, "related_area": "area name or null", "tags": []}</journal>
+
+FULL ACTION CAPABILITIES:
+
+CALENDAR & SCHEDULE:
+- create_event: schedule meetings, calls, blocks
+- reschedule_event: move existing events to new time/date
+- delete_event: remove an event by title or id
+- create_recurring_event: recurring meetings, habits, blocks (use create_event with recurring: true, recurring_days, recurring_weeks)
+
+TASKS & ACTIONS:
+- create_action: add a new task with due date, priority, area
+- complete_action: mark a task as done
+- dismiss_action: mark a task as missed/skipped
+- reschedule_action: change due date of a task
+- update_action_priority: change priority of a task
+- mark_missed: when user says they didn't do something, skipped it, or missed it
   {"type": "mark_missed", "data": {"habit_name": "habit title or null", "action_id": "uuid or null"}}
 - For ad-hoc tasks with no specific life area, use create_action with life_area: "adhoc" or life_area: null
-- Examples: "remind me to call the accountant" -> create_action, no life area
-- "add to my ad-hoc list -- check the invoice" -> create_action, no life area
+  Examples: "remind me to call the accountant" -> create_action, no life area
+
+GOALS & MILESTONES:
+- create_goal: add a new goal to a life area
+- update_goal: change goal title, description, status or target date
+- complete_goal: mark a goal as completed
+- create_milestone: add a milestone to an existing goal
+- complete_milestone: mark a milestone as done
+- update_milestone: change milestone status or target date
+
+HABITS:
+- create_habit: add a new daily/weekly/monthly habit to an area
+- deactivate_habit: turn off a habit so it stops appearing
+- reactivate_habit: turn a habit back on
+
+INTELLIGENCE QUERIES (no tags needed, just answer):
+- "How am I doing this week?"
+- "What's my protein average this month?"
+- "Am I on track for Q1 milestones?"
+- "What did I eat on Tuesday?"
+- "How many workouts this month?"
+- "What actions are due this week?"
+- "What does my Thursday look like?"
+- "When did I last log my weight?"
+For queries, just answer conversationally using the context provided. No action tags needed.
+
+ACTION TAG FORMAT:
 <action>
 {
-  "type": "create_event|complete_action|dismiss_action|reschedule_event|create_action|mark_missed",
+  "type": "action_type_here",
   "data": {
-    "title": "event or action title",
-    "date": "yyyy-MM-dd (use actual upcoming date, never a past date, today is ${format(new Date(), "yyyy-MM-dd")})",
+    "title": "string",
+    "date": "yyyy-MM-dd -- always use actual upcoming date, today is ${todayDateStr}",
     "start_time": "HH:mm",
     "end_time": "HH:mm",
     "event_type": "focus_block|habit|personal|action|external",
-    "action_id": "uuid if completing/dismissing existing action",
-    "event_id": "uuid if rescheduling existing event",
+    "event_id": "uuid if updating existing event",
+    "action_id": "uuid if updating existing action",
+    "goal_id": "uuid if updating existing goal",
+    "milestone_id": "uuid if updating existing milestone",
+    "goal_title": "search term if no id",
+    "milestone_title": "search term if no id",
+    "action_title": "search term if no id",
+    "event_title": "search term if no id",
+    "habit_title": "search term for habit",
     "priority": "high|medium|low",
     "life_area": "area name",
+    "frequency": "daily|weekly|monthly",
+    "status": "active|completed|paused|pending|dismissed",
+    "description": "string",
+    "target_date": "yyyy-MM-dd",
     "recurring": false,
     "recurring_days": [1,2,3,4,5],
     "recurring_weeks": 4
@@ -221,24 +266,12 @@ ACTIONS -- when user asks to create, move, complete or dismiss something, includ
 }
 </action>
 
-For recurring events: set "recurring": true and "recurring_days" to an array of day numbers (0=Sunday, 1=Monday ... 6=Saturday). "recurring_weeks" controls how many weeks ahead to create (default 4). For example, a weekday standup would use "recurring": true, "recurring_days": [1,2,3,4,5].
-
-JOURNAL -- only when genuine emotion or reflection is present:
-<journal>{"content": "...", "sentiment": "positive|neutral|negative|mixed", "energy_level": 1-10 or null, "related_area": "area name or null", "tags": []}</journal>
+For recurring events: set "recurring": true and "recurring_days" to an array of day numbers (0=Sunday, 1=Monday ... 6=Saturday). "recurring_weeks" controls how many weeks ahead to create (default 4).
 
 Daily habits to track: Morning mobility, Log protein intake, No fizzy drinks, Take supplements, Log food, Evening dog walk, Hit 10000 steps, Set top 3 daily priorities, End of day review, MakersForge daily check-in, Rule of 100 actions, Phone down during family time, Intentional moment with kids, Daily learning input, Complete morning routine, 10pm bedtime, Get out of the house, Self-presentation standard, Evening wind-down, No unnecessary spending, Log expenses
 
-Key metrics: Weight (kg), Body fat (%), Daily protein (g), Daily steps, Sleep hours, 5k run time (mins), MakersForge MRR (GBP), Shiftly MRR (GBP), Rule of 100 count, YouTube subscribers
-
-Examples of what you can handle:
-- "Schedule a call with my cofounder tomorrow at 9am" -> create_event
-- "Move my deep work to 3pm" -> reschedule_event
-- "Mark the MakersForge client action as done" -> complete_action
-- "Add an action to chase leads by Friday" -> create_action
-- "Set up a daily standup Mon-Fri at 9am" -> create_event with recurring: true, recurring_days: [1,2,3,4,5]
-- "Did my morning mobility" -> log habit
-- "What does my afternoon look like?" -> answer from context, no tags needed
-- "I weigh 87.5kg" -> log metric`;
+Key metrics: Weight (kg), Body fat (%), Daily protein (g), Daily steps, Sleep hours, 5k run time (mins), MakersForge MRR (GBP), Shiftly MRR (GBP), Rule of 100 count, YouTube subscribers`;
+};
 
 // Frosted card wrapper
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -784,16 +817,274 @@ export default function Dashboard() {
       }
 
       if (type === "reschedule_event") {
-        if (!data.event_id) return { success: false, message: "No event ID to reschedule" };
+        let eventId = data.event_id;
+        if (!eventId && data.event_title) {
+          const { data: found } = await supabase
+            .from("calendar_events")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.event_title}%`)
+            .gte("start_time", new Date().toISOString())
+            .order("start_time")
+            .limit(1)
+            .single();
+          eventId = found?.id;
+        }
+        if (!eventId) return { success: false, message: "No event ID to reschedule" };
         const date = data.date || todayStr;
         const startTime = parseLocalDateTime(date, data.start_time || "09:00");
         const endTime = parseLocalDateTime(date, data.end_time || "10:00");
         const { error } = await supabase.from("calendar_events")
           .update({ start_time: startTime.toISOString(), end_time: endTime.toISOString() })
-          .eq("id", data.event_id);
+          .eq("id", eventId);
         if (error) return { success: false, message: `Failed to reschedule: ${error.message}` };
         await loadData();
         return { success: true, message: `Rescheduled to ${format(startTime, "h:mma")}` };
+      }
+
+      if (type === "delete_event") {
+        let eventId = data.event_id;
+        if (!eventId && data.event_title) {
+          const { data: found } = await supabase
+            .from("calendar_events")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.event_title}%`)
+            .gte("start_time", new Date().toISOString())
+            .order("start_time")
+            .limit(1)
+            .single();
+          eventId = found?.id;
+        }
+        if (!eventId) return { success: false, message: `Could not find event: ${data.event_title}` };
+        const { error } = await supabase.from("calendar_events").delete().eq("id", eventId);
+        if (error) return { success: false, message: `Failed to delete event: ${error.message}` };
+        await loadData();
+        return { success: true, message: `Event deleted` };
+      }
+
+      if (type === "reschedule_action") {
+        let actionId = data.action_id;
+        if (!actionId && data.action_title) {
+          const { data: found } = await supabase
+            .from("actions")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.action_title}%`)
+            .neq("status", "completed")
+            .limit(1)
+            .single();
+          actionId = found?.id;
+        }
+        if (!actionId) return { success: false, message: `Could not find action: ${data.action_title}` };
+        const { error } = await supabase.from("actions")
+          .update({ due_date: data.date })
+          .eq("id", actionId);
+        if (error) return { success: false, message: `Failed to reschedule: ${error.message}` };
+        await loadData();
+        return { success: true, message: `Action rescheduled to ${data.date}` };
+      }
+
+      if (type === "update_action_priority") {
+        let actionId = data.action_id;
+        if (!actionId && data.action_title) {
+          const { data: found } = await supabase
+            .from("actions")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.action_title}%`)
+            .neq("status", "completed")
+            .limit(1)
+            .single();
+          actionId = found?.id;
+        }
+        if (!actionId) return { success: false, message: `Could not find action: ${data.action_title}` };
+        const { error } = await supabase.from("actions")
+          .update({ priority: data.priority })
+          .eq("id", actionId);
+        if (error) return { success: false, message: `Failed to update priority: ${error.message}` };
+        await loadData();
+        return { success: true, message: `Priority updated to ${data.priority}` };
+      }
+
+      if (type === "create_goal") {
+        const lifeArea = areas.find((a: any) =>
+          a.name.toLowerCase().includes((data.life_area || "").toLowerCase())
+        );
+        const { error } = await supabase.from("goals").insert({
+          profile_id: profileId,
+          life_area_id: lifeArea?.id || null,
+          title: data.title,
+          description: data.description || null,
+          target_date: data.target_date || null,
+          status: "active",
+        });
+        if (error) return { success: false, message: `Failed to create goal: ${error.message}` };
+        return { success: true, message: `Goal created: ${data.title}` };
+      }
+
+      if (type === "update_goal") {
+        let goalId = data.goal_id;
+        if (!goalId && data.goal_title) {
+          const { data: found } = await supabase
+            .from("goals")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.goal_title}%`)
+            .limit(1)
+            .single();
+          goalId = found?.id;
+        }
+        if (!goalId) return { success: false, message: `Could not find goal: ${data.goal_title}` };
+        const updates: any = {};
+        if (data.title) updates.title = data.title;
+        if (data.description) updates.description = data.description;
+        if (data.status) updates.status = data.status;
+        if (data.target_date) updates.target_date = data.target_date;
+        const { error } = await supabase.from("goals").update(updates).eq("id", goalId);
+        if (error) return { success: false, message: `Failed to update goal: ${error.message}` };
+        return { success: true, message: `Goal updated` };
+      }
+
+      if (type === "complete_goal") {
+        let goalId = data.goal_id;
+        if (!goalId && data.goal_title) {
+          const { data: found } = await supabase
+            .from("goals")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.goal_title}%`)
+            .limit(1)
+            .single();
+          goalId = found?.id;
+        }
+        if (!goalId) return { success: false, message: `Could not find goal: ${data.goal_title}` };
+        const { error } = await supabase.from("goals")
+          .update({ status: "completed" })
+          .eq("id", goalId);
+        if (error) return { success: false, message: `Failed to complete goal: ${error.message}` };
+        return { success: true, message: `Goal marked complete` };
+      }
+
+      if (type === "create_milestone") {
+        let goalId = data.goal_id;
+        if (!goalId && data.goal_title) {
+          const { data: found } = await supabase
+            .from("goals")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.goal_title}%`)
+            .limit(1)
+            .single();
+          goalId = found?.id;
+        }
+        if (!goalId) return { success: false, message: `Could not find goal to add milestone to` };
+        const { error } = await supabase.from("milestones").insert({
+          profile_id: profileId,
+          goal_id: goalId,
+          quarter: data.quarter || "Q2",
+          title: data.title,
+          description: data.description || null,
+          target_date: data.target_date || null,
+          status: "pending",
+        });
+        if (error) return { success: false, message: `Failed to create milestone: ${error.message}` };
+        return { success: true, message: `Milestone added: ${data.title}` };
+      }
+
+      if (type === "complete_milestone") {
+        let milestoneId = data.milestone_id;
+        if (!milestoneId && data.milestone_title) {
+          const { data: found } = await supabase
+            .from("milestones")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.milestone_title}%`)
+            .limit(1)
+            .single();
+          milestoneId = found?.id;
+        }
+        if (!milestoneId) return { success: false, message: `Could not find milestone: ${data.milestone_title}` };
+        const { error } = await supabase.from("milestones")
+          .update({ status: "completed" })
+          .eq("id", milestoneId);
+        if (error) return { success: false, message: `Failed to complete milestone: ${error.message}` };
+        return { success: true, message: `Milestone marked complete` };
+      }
+
+      if (type === "update_milestone") {
+        let milestoneId = data.milestone_id;
+        if (!milestoneId && data.milestone_title) {
+          const { data: found } = await supabase
+            .from("milestones")
+            .select("id")
+            .eq("profile_id", profileId)
+            .ilike("title", `%${data.milestone_title}%`)
+            .limit(1)
+            .single();
+          milestoneId = found?.id;
+        }
+        if (!milestoneId) return { success: false, message: `Could not find milestone: ${data.milestone_title}` };
+        const updates: any = {};
+        if (data.status) updates.status = data.status;
+        if (data.target_date) updates.target_date = data.target_date;
+        if (data.title) updates.title = data.title;
+        const { error } = await supabase.from("milestones").update(updates).eq("id", milestoneId);
+        if (error) return { success: false, message: `Failed to update milestone: ${error.message}` };
+        return { success: true, message: `Milestone updated` };
+      }
+
+      if (type === "create_habit") {
+        const lifeArea = areas.find((a: any) =>
+          a.name.toLowerCase().includes((data.life_area || "").toLowerCase())
+        );
+        const { error } = await supabase.from("habits").insert({
+          profile_id: profileId,
+          life_area_id: lifeArea?.id || null,
+          title: data.title,
+          description: data.description || null,
+          frequency: data.frequency || "daily",
+          frequency_detail: data.frequency_detail || null,
+          input_type: "boolean",
+          active: true,
+        });
+        if (error) return { success: false, message: `Failed to create habit: ${error.message}` };
+        await loadData();
+        return { success: true, message: `New habit added: ${data.title}` };
+      }
+
+      if (type === "deactivate_habit") {
+        const habitName = data.habit_title || data.title || "";
+        const habit = allHabits.find((h: any) =>
+          h.title.toLowerCase().includes(habitName.toLowerCase()) ||
+          habitName.toLowerCase().includes(h.title.toLowerCase())
+        );
+        if (!habit) return { success: false, message: `Could not find habit: ${habitName}` };
+        const { error } = await supabase.from("habits")
+          .update({ active: false })
+          .eq("id", habit.id);
+        if (error) return { success: false, message: `Failed to deactivate habit: ${error.message}` };
+        await loadData();
+        return { success: true, message: `${habit.title} deactivated` };
+      }
+
+      if (type === "reactivate_habit") {
+        const habitName = data.habit_title || data.title || "";
+        const { data: found } = await supabase
+          .from("habits")
+          .select("id, title")
+          .eq("profile_id", profileId)
+          .eq("active", false)
+          .ilike("title", `%${habitName}%`)
+          .limit(1)
+          .single();
+        if (!found) return { success: false, message: `Could not find inactive habit: ${habitName}` };
+        const { error } = await supabase.from("habits")
+          .update({ active: true })
+          .eq("id", found.id);
+        if (error) return { success: false, message: `Failed to reactivate: ${error.message}` };
+        await loadData();
+        return { success: true, message: `${found.title} reactivated` };
       }
 
       return { success: false, message: `Unknown action type: ${type}` };
@@ -857,12 +1148,52 @@ export default function Dashboard() {
           content: typeof m.content === "string" ? stripTags(m.content) : m.content,
         }))
         .filter(m => typeof m.content === "string" ? m.content.length > 0 : true);
-      const userContent: any = imageBase64
+      let userContent: any = imageBase64
         ? [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageBase64 } },
             { type: "text", text: areaContext + (text || "Log the nutritional info from this food photo.") },
           ]
         : areaContext + text;
+
+      // Intelligence query: inject current data context if user is asking a question
+      const isQuery = /\b(how|what|when|am i|did i|have i|show me|tell me|check|status|progress|doing|track)\b/i.test(text);
+      if (isQuery && profileId) {
+        try {
+          const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
+
+          const [
+            { data: recentLogs },
+            { data: dueSoon },
+            { data: recentMetrics },
+            { data: activeGoals },
+          ] = await Promise.all([
+            supabase.from("habit_logs").select("habit_id, value, logged_at, habits(title)").eq("profile_id", profileId).gte("logged_at", weekStart).order("logged_at", { ascending: false }).limit(30),
+            supabase.from("actions").select("title, due_date, priority, status, life_areas(name)").eq("profile_id", profileId).neq("status", "completed").neq("status", "dismissed").lte("due_date", format(addDays(new Date(), 7), "yyyy-MM-dd")).order("due_date").limit(10),
+            supabase.from("metric_logs").select("value, logged_at, metrics(name, unit)").eq("profile_id", profileId).gte("logged_at", weekStart).order("logged_at", { ascending: false }).limit(20),
+            supabase.from("goals").select("title, status, life_areas(name)").eq("profile_id", profileId).eq("status", "active").limit(10),
+          ]);
+
+          const contextBlock = `
+[CURRENT DATA CONTEXT -- use this to answer the query]
+Today: ${format(new Date(), "EEEE d MMMM yyyy")}
+Habits logged this week: ${(recentLogs || []).filter((l: any) => l.value !== "missed").map((l: any) => `${l.habits?.title} (${l.logged_at})`).join(", ") || "none"}
+Habits missed this week: ${(recentLogs || []).filter((l: any) => l.value === "missed").map((l: any) => l.habits?.title).join(", ") || "none"}
+Actions due soon: ${(dueSoon || []).map((a: any) => `${a.title} (${a.due_date}, ${a.priority})`).join(", ") || "none"}
+Recent metrics: ${(recentMetrics || []).map((m: any) => `${m.metrics?.name}: ${m.value}${m.metrics?.unit || ""} on ${m.logged_at}`).join(", ") || "none"}
+Active goals: ${(activeGoals || []).map((g: any) => `${g.title} (${g.life_areas?.name || "no area"})`).join(", ") || "none"}
+[END CONTEXT]
+
+`;
+          if (typeof userContent === "string") {
+            userContent = contextBlock + userContent;
+          } else if (Array.isArray(userContent)) {
+            const textPart = userContent.find((p: any) => p.type === "text");
+            if (textPart) textPart.text = contextBlock + textPart.text;
+          }
+        } catch (e) {
+          // Context fetch failed silently
+        }
+      }
 
       const response = await fetch("/api/chat", {
         method: "POST",
