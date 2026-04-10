@@ -81,7 +81,7 @@ function CardHeader({ title, right }: { title: string; right?: React.ReactNode }
       padding: "11px 14px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
     }}>
-      <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "13px", fontWeight: 600, color: "#fff", margin: 0 }}>
+      <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "13px", fontWeight: 700, color: "#fff", margin: 0 }}>
         {title}
       </h2>
       {right}
@@ -418,7 +418,7 @@ Response format:
                     padding: "12px 28px",
                     fontSize: "14px",
                     fontWeight: 600,
-                    fontFamily: '"Cal Sans", Inter, sans-serif',
+                    fontFamily: 'Inter, sans-serif',
                     cursor: "pointer",
                     boxShadow: "0 2px 12px rgba(44,95,138,0.35)",
                     transition: "transform 0.15s ease",
@@ -502,8 +502,8 @@ Response format:
                           </span>
                         </div>
                         <h3 style={{
-                          fontFamily: '"Cal Sans", Inter, sans-serif',
-                          fontSize: "14px", fontWeight: 600, color: "#111827",
+                          fontFamily: 'Inter, sans-serif',
+                          fontSize: "14px", fontWeight: 700, color: "#111827",
                           margin: "0 0 4px 0",
                         }}>
                           {insight.title}
@@ -595,13 +595,13 @@ Response format:
                   {avgThisWeek && (
                     <div>
                       <p style={{ fontSize: "11px", color: "#9CA3AF", marginBottom: "2px" }}>This week avg</p>
-                      <p style={{ fontSize: "16px", fontWeight: 700, color: "#2C5F8A", fontFamily: '"Cal Sans", Inter, sans-serif' }}>{avgThisWeek}/10</p>
+                      <p style={{ fontSize: "16px", fontWeight: 700, color: "#2C5F8A" }}>{avgThisWeek}/10</p>
                     </div>
                   )}
                   {avgLastWeek && (
                     <div>
                       <p style={{ fontSize: "11px", color: "#9CA3AF", marginBottom: "2px" }}>Last week avg</p>
-                      <p style={{ fontSize: "16px", fontWeight: 700, color: "#6B7280", fontFamily: '"Cal Sans", Inter, sans-serif' }}>{avgLastWeek}/10</p>
+                      <p style={{ fontSize: "16px", fontWeight: 700, color: "#6B7280" }}>{avgLastWeek}/10</p>
                     </div>
                   )}
                 </div>
@@ -636,8 +636,8 @@ Response format:
                         backgroundColor: moodColor, flexShrink: 0,
                       }} />
                       <h3 style={{
-                        fontFamily: '"Cal Sans", Inter, sans-serif',
-                        fontSize: "14px", fontWeight: 600, color: "#111827", margin: 0, flex: 1,
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: "14px", fontWeight: 700, color: "#111827", margin: 0, flex: 1,
                       }}>
                         {format(parseISO(entry.date), "EEEE, d MMMM")}
                       </h3>

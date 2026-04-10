@@ -299,7 +299,7 @@ function CardHeader({ title, right }: { title: string; right?: React.ReactNode }
       padding: "11px 14px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
     }}>
-      <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "13px", fontWeight: 600, color: "#fff", margin: 0 }}>
+      <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "13px", fontWeight: 700, color: "#fff", margin: 0 }}>
         {title}
       </h2>
       {right}
@@ -1632,7 +1632,7 @@ Active goals: ${(activeGoals || []).map((g: any) => `${g.title} (${g.life_areas?
             return (
               <Card style={{ padding: "32px 20px", textAlign: "center" }}>
                 <CheckCircle2 size={28} color="#4A8C6F" style={{ margin: "0 auto 10px" }} />
-                <p style={{ fontSize: "15px", fontWeight: 600, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>All clear today. Great work.</p>
+                <p style={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>All clear today. Great work.</p>
               </Card>
             );
           }
@@ -1658,7 +1658,7 @@ Active goals: ${(activeGoals || []).map((g: any) => `${g.title} (${g.life_areas?
                     }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                         <AreaIcon size={14} color="#fff" />
-                        <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "12px", fontWeight: 600, color: "#fff" }}>
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: "12px", fontWeight: 700, color: "#fff" }}>
                           {areaName.split(" & ")[0].split(" ")[0]}
                         </span>
                       </div>
@@ -1841,7 +1841,7 @@ Active goals: ${(activeGoals || []).map((g: any) => `${g.title} (${g.life_areas?
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                     <Zap size={14} color="#fff" />
-                    <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "12px", fontWeight: 600, color: "#fff" }}>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: "12px", fontWeight: 700, color: "#fff" }}>
                       Ad-Hoc
                     </span>
                   </div>

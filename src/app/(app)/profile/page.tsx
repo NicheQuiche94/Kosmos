@@ -25,7 +25,7 @@ function CardHeader({ title, icon }: { title: string; icon?: React.ReactNode }) 
       display: "flex", alignItems: "center", gap: "8px",
     }}>
       {icon}
-      <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", fontWeight: 600, color: "#fff", margin: 0 }}>
+      <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "14px", fontWeight: 700, color: "#fff", margin: 0 }}>
         {title}
       </h2>
     </div>
@@ -309,7 +309,7 @@ export default function ProfilePage() {
                   <Target size={14} color="#2C5F8A" />
                 </div>
                 <div style={{ textAlign: "left" }}>
-                  <div style={{ fontSize: "18px", fontWeight: 700, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                  <div style={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>
                     {totalGoals}
                   </div>
                   <div style={{ fontSize: "11px", color: "#9CA3AF" }}>Goals</div>
@@ -324,7 +324,7 @@ export default function ProfilePage() {
                   <CheckSquare size={14} color="#4A8C6F" />
                 </div>
                 <div style={{ textAlign: "left" }}>
-                  <div style={{ fontSize: "18px", fontWeight: 700, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                  <div style={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>
                     {totalHabits}
                   </div>
                   <div style={{ fontSize: "11px", color: "#9CA3AF" }}>Actions</div>

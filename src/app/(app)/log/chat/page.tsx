@@ -249,8 +249,8 @@ export default function ChatLog() {
         </button>
         <div>
           <h1 style={{
-            fontFamily: '"Cal Sans", Inter, sans-serif',
-            fontSize: "17px", color: "#111827", lineHeight: 1,
+            fontFamily: 'Inter, sans-serif',
+            fontSize: "17px", fontWeight: 700, color: "#111827", lineHeight: 1,
           }}>
             Log with Kosmos
           </h1>

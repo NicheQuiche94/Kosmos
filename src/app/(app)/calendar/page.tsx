@@ -57,7 +57,7 @@ function GradientCard({ children, style }: { children: React.ReactNode; style?: 
 function CardHeader({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
     <div style={{ background: GRADIENT, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", fontWeight: 600, color: "#fff", margin: 0 }}>
+      <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "14px", fontWeight: 700, color: "#fff", margin: 0 }}>
         {title}
       </h2>
       {right}
@@ -350,8 +350,8 @@ export default function CalendarPage() {
                         {format(day, "EEE")}
                       </span>
                       <span style={{
-                        fontSize: "15px", fontWeight: 600, marginTop: "3px",
-                        fontFamily: '"Cal Sans", Inter, sans-serif',
+                        fontSize: "15px", fontWeight: 700, marginTop: "3px",
+                        fontFamily: 'Inter, sans-serif',
                         color: isSelected ? "#fff" : isToday ? "#2C5F8A" : "#111827",
                       }}>
                         {format(day, "d")}
@@ -546,8 +546,8 @@ export default function CalendarPage() {
                         {format(day, "EEE")}
                       </p>
                       <p style={{
-                        fontSize: "14px", fontWeight: 600,
-                        fontFamily: '"Cal Sans", Inter, sans-serif',
+                        fontSize: "14px", fontWeight: 700,
+                        fontFamily: 'Inter, sans-serif',
                         color: isToday ? "#2C5F8A" : "#111827",
                         marginTop: "2px",
                       }}>
@@ -885,8 +885,8 @@ export default function CalendarPage() {
                     background: newEvent.title.trim() ? GRADIENT : "#F3F4F6",
                     border: "none", borderRadius: "12px",
                     color: newEvent.title.trim() ? "#fff" : "#9CA3AF",
-                    fontSize: "14px", fontWeight: 600,
-                    fontFamily: '"Cal Sans", Inter, sans-serif',
+                    fontSize: "14px", fontWeight: 700,
+                    fontFamily: 'Inter, sans-serif',
                     cursor: newEvent.title.trim() ? "pointer" : "default",
                     transition: "all 0.15s",
                     boxShadow: newEvent.title.trim() ? "0 2px 10px rgba(44,95,138,0.3)" : "none",
@@ -922,7 +922,7 @@ export default function CalendarPage() {
                     <div style={{ width: "10px", height: "10px", borderRadius: "50%", backgroundColor: getEventColor(selectedEvent) }} />
                   </div>
                   <div>
-                    <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "18px", color: "#111827" }}>
+                    <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "18px", fontWeight: 700, color: "#111827" }}>
                       {selectedEvent.title}
                     </h2>
                     {selectedEvent.life_areas?.name && (

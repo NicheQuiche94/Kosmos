@@ -47,8 +47,9 @@ const card: React.CSSProperties = {
 };
 
 const sectionTitle: React.CSSProperties = {
-  fontFamily: '"Cal Sans", Inter, sans-serif',
+  fontFamily: 'Inter, sans-serif',
   fontSize: "16px",
+  fontWeight: 700,
   color: "#111827",
   marginBottom: "14px",
   display: "flex",

@@ -41,7 +41,7 @@ export default function Sidebar() {
           display: "flex", alignItems: "center", justifyContent: "center",
           marginBottom: "32px", flexShrink: 0,
         }}>
-          <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', color: "#fff", fontSize: "14px", fontWeight: 600 }}>K</span>
+          <span style={{ fontFamily: 'Inter, sans-serif', color: "#fff", fontSize: "14px", fontWeight: 700 }}>K</span>
         </div>
 
         {/* Nav items */}

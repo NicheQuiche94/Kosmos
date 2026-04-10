@@ -30,7 +30,7 @@ function CardHeader({ title, icon }: { title: string; icon?: React.ReactNode }) 
       display: "flex", alignItems: "center", gap: "8px",
     }}>
       {icon}
-      <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", fontWeight: 600, color: "#fff", margin: 0 }}>
+      <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "14px", fontWeight: 700, color: "#fff", margin: 0 }}>
         {title}
       </h2>
     </div>
@@ -442,7 +442,7 @@ export default function AnalyticsPage() {
                       <span style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>{w.name}</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: "4px" }}>
-                      <span style={{ fontSize: "18px", fontWeight: 700, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                      <span style={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>
                         {w.unit === "GBP" ? "\u00A3" : ""}{w.value.toLocaleString()}
                       </span>
                       {w.target > 0 && (
@@ -482,7 +482,7 @@ export default function AnalyticsPage() {
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Beef size={14} color="#fff" />
-              <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", fontWeight: 600, color: "#fff", margin: 0 }}>
+              <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: "14px", fontWeight: 700, color: "#fff", margin: 0 }}>
                 Nutrition Logbook
               </h2>
             </div>
@@ -514,7 +514,7 @@ export default function AnalyticsPage() {
                   }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
                     Previous day
                   </button>
-                  <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", color: "#111827" }}>
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: "14px", fontWeight: 700, color: "#111827" }}>
                     {format(new Date(nutritionDate + "T12:00:00"), "EEEE, d MMMM")}
                   </span>
                   <button onClick={() => {
@@ -557,7 +557,7 @@ export default function AnalyticsPage() {
                           { label: "Fat", value: `${Math.round(dayTotals.fat_g)}g`, color: "#7C3AED" },
                         ].map(t => (
                           <div key={t.label} style={{ textAlign: "center" }}>
-                            <div style={{ fontSize: "16px", fontWeight: 700, color: t.color, fontFamily: '"Cal Sans", Inter, sans-serif' }}>{t.value}</div>
+                            <div style={{ fontSize: "16px", fontWeight: 700, color: t.color }}>{t.value}</div>
                             <div style={{ fontSize: "9px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>{t.label}</div>
                           </div>
                         ))}
@@ -657,7 +657,7 @@ export default function AnalyticsPage() {
                     }} style={{ background: "none", border: "none", cursor: "pointer", color: "#2C5F8A", fontSize: "13px", fontWeight: 500 }}>
                       Previous week
                     </button>
-                    <span style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "13px", color: "#111827" }}>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: "13px", fontWeight: 700, color: "#111827" }}>
                       {format(monday, "d MMM")} – {format(days[6].display, "d MMM")}
                     </span>
                     <button onClick={() => {
@@ -687,7 +687,7 @@ export default function AnalyticsPage() {
                               flexShrink: 0,
                             }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: "12px", fontWeight: 600, color: "#111827", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                              <div style={{ fontSize: "12px", fontWeight: 700, color: "#111827" }}>
                                 {d.dayName}
                               </div>
                               <div style={{ fontSize: "10px", color: "#9CA3AF", marginTop: "2px" }}>
@@ -713,25 +713,25 @@ export default function AnalyticsPage() {
                       }}>
                         <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
                           <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Total calories</div>
-                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#2C5F8A", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#2C5F8A" }}>
                             {Math.round(totalCal).toLocaleString()}
                           </div>
                         </div>
                         <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
                           <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Avg daily protein</div>
-                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#4A8C6F", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#4A8C6F" }}>
                             {avgProtein}g
                           </div>
                         </div>
                         <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
                           <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Best protein day</div>
-                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#4A8C6F", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#4A8C6F" }}>
                             {bestProteinDay ? `${bestProteinDay.dayName} ${bestProteinDay.protein}g` : "—"}
                           </div>
                         </div>
                         <div style={{ padding: "10px 12px", backgroundColor: "#FAFAF8", borderRadius: "10px" }}>
                           <div style={{ fontSize: "10px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase" }}>Protein target hit</div>
-                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#D97706", fontFamily: '"Cal Sans", Inter, sans-serif' }}>
+                          <div style={{ fontSize: "18px", fontWeight: 700, color: "#D97706" }}>
                             {proteinTargetHits}/7 days
                           </div>
                         </div>

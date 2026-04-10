@@ -209,8 +209,8 @@ export default function LogHabitPage() {
           disabled={!selectedHabit || (needsValue && !value) || saving || saved}
           style={{
             width: "100%", padding: "14px", borderRadius: "14px",
-            border: "none", fontSize: "15px", fontWeight: 600, cursor: "pointer",
-            fontFamily: '"Cal Sans", Inter, sans-serif',
+            border: "none", fontSize: "15px", fontWeight: 700, cursor: "pointer",
+            fontFamily: 'Inter, sans-serif',
             background: !selectedHabit || (needsValue && !value) ? "#E5E7EB" : GRADIENT,
             color: !selectedHabit || (needsValue && !value) ? "#9CA3AF" : "#fff",
             display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",

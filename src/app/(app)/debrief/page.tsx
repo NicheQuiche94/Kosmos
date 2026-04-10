@@ -462,8 +462,8 @@ export default function DebriefPage() {
               disabled={dayMarked}
               style={{
                 width: "100%", padding: "10px", borderRadius: "12px",
-                border: "none", fontSize: "13px", fontWeight: 600, cursor: "pointer",
-                fontFamily: '"Cal Sans", Inter, sans-serif',
+                border: "none", fontSize: "13px", fontWeight: 700, cursor: "pointer",
+                fontFamily: 'Inter, sans-serif',
                 background: dayMarked ? "#ECFDF5" : "linear-gradient(135deg, #2C5F8A18, #4A9B8E18)",
                 color: dayMarked ? "#059669" : "#2C5F8A",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
