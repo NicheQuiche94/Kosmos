@@ -6,6 +6,7 @@ import { useProfileStore } from "@/store/profileStore";
 import { supabase } from "@/lib/supabase";
 import { ArrowLeft, Send, Loader2 } from "lucide-react";
 import { format } from "date-fns";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   id: string;
@@ -286,7 +287,23 @@ export default function ChatLog() {
                 : "none",
               border: message.role === "assistant" ? "1px solid rgba(0,0,0,0.04)" : "none",
             }}>
-              {message.content}
+              {message.role === "assistant" ? (
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <p style={{ margin: "0 0 8px 0" }}>{children}</p>,
+                    ul: ({ children }) => <ul style={{ margin: "4px 0 8px 16px", padding: 0 }}>{children}</ul>,
+                    ol: ({ children }) => <ol style={{ margin: "4px 0 8px 16px", padding: 0 }}>{children}</ol>,
+                    li: ({ children }) => <li style={{ margin: "2px 0", fontSize: "14px" }}>{children}</li>,
+                    strong: ({ children }) => <strong style={{ fontWeight: 600, color: "#111827" }}>{children}</strong>,
+                    h1: ({ children }) => <h1 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "16px", margin: "8px 0 6px" }}>{children}</h1>,
+                    h2: ({ children }) => <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", margin: "8px 0 4px" }}>{children}</h2>,
+                    h3: ({ children }) => <h3 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "13px", margin: "6px 0 4px" }}>{children}</h3>,
+                    code: ({ children }) => <code style={{ backgroundColor: "rgba(0,0,0,0.06)", padding: "1px 5px", borderRadius: "4px", fontSize: "12px" }}>{children}</code>,
+                  }}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              ) : message.content}
             </div>
           </div>
         ))}

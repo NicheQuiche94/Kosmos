@@ -9,6 +9,7 @@ import {
   CheckCircle2, MessageCircle, Loader2, Plus, ChevronRight,
   XCircle, Zap,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { supabase } from "@/lib/supabase";
 import { logHabit, completeAction } from "@/lib/data";
 import {
@@ -270,7 +271,15 @@ For recurring events: set "recurring": true and "recurring_days" to an array of 
 
 Daily habits to track: Morning mobility, Log protein intake, No fizzy drinks, Take supplements, Log food, Evening dog walk, Hit 10000 steps, Set top 3 daily priorities, End of day review, MakersForge daily check-in, Rule of 100 actions, Phone down during family time, Intentional moment with kids, Daily learning input, Complete morning routine, 10pm bedtime, Get out of the house, Self-presentation standard, Evening wind-down, No unnecessary spending, Log expenses
 
-Key metrics: Weight (kg), Body fat (%), Daily protein (g), Daily steps, Sleep hours, 5k run time (mins), MakersForge MRR (GBP), Shiftly MRR (GBP), Rule of 100 count, YouTube subscribers`;
+Key metrics: Weight (kg), Body fat (%), Daily protein (g), Daily steps, Sleep hours, 5k run time (mins), MakersForge MRR (GBP), Shiftly MRR (GBP), Rule of 100 count, YouTube subscribers
+
+RESPONSE FORMATTING:
+- Use markdown formatting in responses
+- Use **bold** for key numbers, names, or important points
+- Use bullet points for lists of items
+- Use short paragraphs -- never walls of text
+- Keep responses concise -- 2-4 sentences for simple logs, structured lists for queries
+- For intelligence queries, use headers and bullet points to organise the answer clearly`;
 };
 
 // Frosted card wrapper
@@ -1427,7 +1436,23 @@ Active goals: ${(activeGoals || []).map((g: any) => `${g.title} (${g.life_areas?
                       padding: "11px 15px", fontSize: "13px", lineHeight: 1.55,
                       border: message.role === "assistant" ? "1px solid rgba(255,255,255,0.6)" : "none",
                     }}>
-                      {message.content}
+                      {message.role === "assistant" ? (
+                        <ReactMarkdown
+                          components={{
+                            p: ({ children }) => <p style={{ margin: "0 0 8px 0" }}>{children}</p>,
+                            ul: ({ children }) => <ul style={{ margin: "4px 0 8px 16px", padding: 0 }}>{children}</ul>,
+                            ol: ({ children }) => <ol style={{ margin: "4px 0 8px 16px", padding: 0 }}>{children}</ol>,
+                            li: ({ children }) => <li style={{ margin: "2px 0", fontSize: "13px" }}>{children}</li>,
+                            strong: ({ children }) => <strong style={{ fontWeight: 600, color: "#111827" }}>{children}</strong>,
+                            h1: ({ children }) => <h1 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "16px", margin: "8px 0 6px" }}>{children}</h1>,
+                            h2: ({ children }) => <h2 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "14px", margin: "8px 0 4px" }}>{children}</h2>,
+                            h3: ({ children }) => <h3 style={{ fontFamily: '"Cal Sans", Inter, sans-serif', fontSize: "13px", margin: "6px 0 4px" }}>{children}</h3>,
+                            code: ({ children }) => <code style={{ backgroundColor: "rgba(0,0,0,0.06)", padding: "1px 5px", borderRadius: "4px", fontSize: "12px" }}>{children}</code>,
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      ) : message.content}
                     </div>
                   )}
                 </div>
